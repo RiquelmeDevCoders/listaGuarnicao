@@ -736,10 +736,15 @@ async function boot() {
     }
     await enter(profile);
   } catch (e) {
+    console.error('Erro na inicialização do sistema:', e);
     const code = e && e.code;
-    $('errorText').textContent = code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation'
-      ? 'Login anônimo não habilitado no Firebase. Avise o administrador.'
-      : 'Não foi possível conectar ao sistema. Verifique sua internet e tente novamente.';
+    if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+      $('errorText').textContent = 'Login anônimo não habilitado no Firebase. Ative em Authentication > Método de login.';
+    } else if (code === 'auth/configuration-not-found') {
+      $('errorText').textContent = 'Authentication não iniciado no Firebase. Acesse o console do Firebase e clique em "Começar" no menu Authentication.';
+    } else {
+      $('errorText').textContent = 'Não foi possível conectar ao sistema. Verifique o console do navegador e sua conexão.';
+    }
     show('error');
   }
 }
