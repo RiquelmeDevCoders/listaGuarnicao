@@ -1,0 +1,249 @@
+rules_version = '2';
+
+// Escala SD EV — Firestore Security Rules
+//
+// Modelo:
+//   users/{uid}        perfil do militar (nome de guerra, OM, bloqueio)
+//   escalas/{AAAA-MM-DD} uma escala por dia, com as 9 vagas em um único documento
+//   config/admin       uid do administrador (SD EV RIQUELME)
+//
+// Horário: toda validação de abertura/fechamento usa request.time (relógio do
+// servidor Google), nunca o relógio do celular. Brasília = UTC-3 (sem horário
+// de verão desde 2019). Se o horário de verão voltar, ajustar OFFSET abaixo.
+//
+// Janela de preenchimento da escala do dia D:
+//   abre  no dia D-1 às 18:00 (seg a sex) ou 16:00 (sáb e dom)
+//   fecha no dia D às 00:00 (vira histórico, somente leitura)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function adminPath() {
+      return /databases/$(database)/documents/config/admin;
+    }
+
+    function hasProfile() {
+      return signedIn() && exists(userPath(request.auth.uid));
+    }
+
+    function me() {
+      return get(userPath(request.auth.uid)).data;
+    }
+
+    function activeUser() {
+      return hasProfile() && me().bloqueado == false;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(adminPath())
+        && get(adminPath()).data.uid == request.auth.uid;
+    }
+
+    function validNome(n) {
+      return n is string
+        && n.size() >= 2
+        && n.size() <= 20
+        && n.matches('^[A-ZÁÂÃÀÉÊÍÓÔÕÚÜÇ][A-ZÁÂÃÀÉÊÍÓÔÕÚÜÇ ]*[A-ZÁÂÃÀÉÊÍÓÔÕÚÜÇ]$');
+    }
+
+    function validOm(o) {
+      return o in ['CIA C', 'PE'];
+    }
+
+    function slotKeys() {
+      return ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
+    }
+
+    function validDia(dia) {
+      return dia.matches('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+    }
+
+    // 00:00 UTC do dia da escala
+    function diaUtc(dia) {
+      return timestamp.date(int(dia[0:4]), int(dia[5:7]), int(dia[8:10]));
+    }
+
+    // 0 = domingo ... 6 = sábado (01/01/1970 foi quinta-feira)
+    function weekday(dia) {
+      return (int(diaUtc(dia).toMillis() / 86400000) + 4) % 7;
+    }
+
+    // Véspera é sábado ou domingo quando a escala é de domingo ou segunda.
+    // Abertura: D-1 18:00 BRT = D 00:00 UTC - 3h ; D-1 16:00 BRT = D 00:00 UTC - 5h
+    function abertura(dia) {
+      return weekday(dia) == 0 || weekday(dia) == 1
+        ? diaUtc(dia) - duration.value(5, 'h')
+        : diaUtc(dia) - duration.value(3, 'h');
+    }
+
+    // Fechamento: D 00:00 BRT = D 00:00 UTC + 3h
+    function fechamento(dia) {
+      return diaUtc(dia) + duration.value(3, 'h');
+    }
+
+    function janelaAberta(dia) {
+      return validDia(dia)
+        && request.time >= abertura(dia)
+        && request.time < fechamento(dia);
+    }
+
+    function notMine(s) {
+      return s == null || s.uid != request.auth.uid;
+    }
+
+    function noneMine(s) {
+      return notMine(s.h1p1) && notMine(s.h1p2) && notMine(s.h1p3)
+        && notMine(s.h2p1) && notMine(s.h2p2) && notMine(s.h2p3)
+        && notMine(s.h3p1) && notMine(s.h3p2) && notMine(s.h3p3);
+    }
+
+    function occ(s) {
+      return s == null ? 0 : 1;
+    }
+
+    function countFilled(s) {
+      return occ(s.h1p1) + occ(s.h1p2) + occ(s.h1p3)
+        + occ(s.h2p1) + occ(s.h2p2) + occ(s.h2p3)
+        + occ(s.h3p1) + occ(s.h3p2) + occ(s.h3p3);
+    }
+
+    function validSlotsShape(s) {
+      return s is map
+        && s.keys().hasAll(slotKeys())
+        && s.keys().hasOnly(slotKeys());
+    }
+
+    // Vaga que o próprio militar está assumindo agora
+    function validTake(v) {
+      return v is map
+        && v.keys().hasAll(['uid', 'nome', 'om', 'em'])
+        && v.keys().hasOnly(['uid', 'nome', 'om', 'em'])
+        && v.uid == request.auth.uid
+        && v.nome == me().nome
+        && v.om == me().om
+        && v.em == request.time;
+    }
+
+    function newSlotOk(v) {
+      return v == null || validTake(v);
+    }
+
+    function validCreate(dia) {
+      let d = request.resource.data;
+      let s = d.slots;
+      return d.keys().hasAll(['data', 'createdAt', 'slots'])
+        && d.keys().hasOnly(['data', 'createdAt', 'slots'])
+        && d.data == dia
+        && d.createdAt == request.time
+        && validSlotsShape(s)
+        && countFilled(s) <= 1
+        && newSlotOk(s.h1p1) && newSlotOk(s.h1p2) && newSlotOk(s.h1p3)
+        && newSlotOk(s.h2p1) && newSlotOk(s.h2p2) && newSlotOk(s.h2p3)
+        && newSlotOk(s.h3p1) && newSlotOk(s.h3p2) && newSlotOk(s.h3p3);
+    }
+
+    // Transição permitida para uma vaga, feita por militar comum:
+    //   sem mudança | livre -> minha (se eu não tiver outra) | minha -> livre
+    function slotTransitionOk(k) {
+      let a = resource.data.slots[k];
+      let b = request.resource.data.slots[k];
+      return a == b
+        || (a == null && validTake(b) && noneMine(resource.data.slots))
+        || (a != null && a.uid == request.auth.uid && b == null);
+    }
+
+    function validUserUpdate() {
+      let s = request.resource.data.slots;
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slots'])
+        && validSlotsShape(s)
+        && s.diff(resource.data.slots).affectedKeys().size() == 1
+        && slotTransitionOk('h1p1') && slotTransitionOk('h1p2') && slotTransitionOk('h1p3')
+        && slotTransitionOk('h2p1') && slotTransitionOk('h2p2') && slotTransitionOk('h2p3')
+        && slotTransitionOk('h3p1') && slotTransitionOk('h3p2') && slotTransitionOk('h3p3');
+    }
+
+    // Administrador: pode apenas liberar (remover) vagas, em qualquer escala
+    function adminSlotOk(k) {
+      let a = resource.data.slots[k];
+      let b = request.resource.data.slots[k];
+      return a == b || b == null;
+    }
+
+    function validAdminUpdate() {
+      let s = request.resource.data.slots;
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slots'])
+        && validSlotsShape(s)
+        && adminSlotOk('h1p1') && adminSlotOk('h1p2') && adminSlotOk('h1p3')
+        && adminSlotOk('h2p1') && adminSlotOk('h2p2') && adminSlotOk('h2p3')
+        && adminSlotOk('h3p1') && adminSlotOk('h3p2') && adminSlotOk('h3p3');
+    }
+
+    function validNewUser(uid) {
+      let d = request.resource.data;
+      return d.keys().hasAll(['nome', 'om', 'createdAt', 'lastSeen', 'bloqueado'])
+        && d.keys().hasOnly(['nome', 'om', 'createdAt', 'lastSeen', 'bloqueado'])
+        && validNome(d.nome)
+        && validOm(d.om)
+        && d.createdAt == request.time
+        && d.lastSeen == request.time
+        && d.bloqueado == false
+        && (d.nome != 'RIQUELME'
+            || getAfter(adminPath()).data.uid == uid);
+    }
+
+    function validSelfUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen'])
+        && request.resource.data.lastSeen == request.time;
+    }
+
+    function validAdminUserUpdate() {
+      let d = request.resource.data;
+      return d.diff(resource.data).affectedKeys().hasOnly(['nome', 'om', 'bloqueado'])
+        && validNome(d.nome)
+        && validOm(d.om)
+        && d.bloqueado is bool;
+    }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if signedIn() && request.auth.uid == uid && validNewUser(uid);
+      allow update: if signedIn()
+        && ((request.auth.uid == uid && validSelfUpdate())
+            || (isAdmin() && validAdminUserUpdate()));
+      allow delete: if false;
+    }
+
+    match /config/admin {
+      allow get: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['uid', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && getAfter(userPath(request.auth.uid)).data.nome == 'RIQUELME';
+      allow update, delete: if false;
+    }
+
+    match /escalas/{dia} {
+      allow read: if hasProfile();
+      allow create: if activeUser() && janelaAberta(dia) && validCreate(dia);
+      allow update: if (activeUser() && janelaAberta(dia) && validUserUpdate())
+        || (isAdmin() && validAdminUpdate());
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

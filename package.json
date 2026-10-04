@@ -1,0 +1,22 @@
+{
+  "name": "escala-sd-ev",
+  "version": "1.0.0",
+  "description": "Lista da Guarnição — Escala SD EV",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node --test tests/time.test.mjs && firebase emulators:exec --only firestore --project demo-listagrd \"node --test tests/rules.test.mjs\"",
+    "test:time": "node --test tests/time.test.mjs",
+    "serve": "npx --yes http-server -p 5173 -c-1 ."
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0",
+    "firebase-tools": "^15.32.1",
+    "playwright": "^1.59.0"
+  },
+  "private": true,
+  "type": "module"
+}

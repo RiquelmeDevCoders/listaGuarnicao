@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Escala SD EV — Lista da Guarnição</title>
+  <meta name="description" content="Consulte e preencha a lista da guarnição dos SD EVs.">
+  <meta name="theme-color" content="#121812">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Escala SD EV">
+  <meta property="og:title" content="Escala SD EV — Lista da Guarnição">
+  <meta property="og:description" content="Confira e preencha a escala da guarnição.">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+  <link rel="modulepreload" href="js/app.js">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Pular para o conteúdo</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/icon.svg" alt="" width="32" height="32">
+      <div>
+        <strong>ESCALA SD EV</strong>
+        <span>Lista da Guarnição</span>
+      </div>
+    </div>
+    <nav class="topnav" aria-label="Navegação">
+      <a href="#" class="navbtn hidden" id="navHome" aria-label="Voltar para a escala">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        <span>Escala</span>
+      </a>
+      <a href="#admin" class="navbtn hidden" id="navAdmin">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>
+        <span>ADM</span>
+      </a>
+    </nav>
+  </header>
+
+  <div class="netbar hidden" id="netbar" role="status">Sem conexão — exibindo dados salvos. Reservas exigem internet.</div>
+
+  <main id="main" tabindex="-1">
+
+    <section id="view-loading" class="view">
+      <div class="loader" role="status">
+        <span class="spinner" aria-hidden="true"></span>
+        <p>Carregando escala…</p>
+      </div>
+    </section>
+
+    <section id="view-error" class="view hidden">
+      <div class="card center">
+        <h1 class="h-title">Falha na conexão</h1>
+        <p class="muted" id="errorText">Não foi possível conectar ao sistema. Verifique sua internet.</p>
+        <button class="btn btn-primary" type="button" id="btnRetry">TENTAR NOVAMENTE</button>
+      </div>
+    </section>
+
+    <section id="view-register" class="view hidden" aria-labelledby="regTitle">
+      <div class="card">
+        <p class="eyebrow">PRIMEIRO ACESSO</p>
+        <h1 class="h-title" id="regTitle">Identificação do militar</h1>
+        <p class="muted">Preencha uma única vez. Seus dados ficam salvos neste aparelho.</p>
+        <form id="regForm" novalidate>
+          <label class="field">
+            <span>Nome de guerra</span>
+            <input id="regNome" name="nome" type="text" inputmode="text" autocomplete="off"
+                   autocapitalize="characters" spellcheck="false" maxlength="20"
+                   placeholder="Ex.: SILVA" required aria-describedby="regNomeHint">
+            <small id="regNomeHint">Somente letras e espaço. De 2 a 20 caracteres.</small>
+          </label>
+          <fieldset class="field">
+            <legend>OM</legend>
+            <div class="om-options">
+              <label class="om-opt">
+                <input type="radio" name="om" value="CIA C" required>
+                <span>CIA C</span>
+              </label>
+              <label class="om-opt">
+                <input type="radio" name="om" value="PE" required>
+                <span>PE</span>
+              </label>
+            </div>
+          </fieldset>
+          <p class="form-error hidden" id="regError" role="alert"></p>
+          <button class="btn btn-primary btn-block" type="submit" id="regSubmit">ENTRAR NO SISTEMA</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="view-home" class="view hidden">
+      <div class="hello">
+        <p class="hello-line"><span id="greet">Olá</span>, <strong id="helloNome"></strong>.</p>
+        <span class="tag" id="helloOm"></span>
+      </div>
+      <p class="today" id="todayLine"></p>
+
+      <article class="card scale-card" aria-labelledby="scaleTitle">
+        <p class="eyebrow">LISTA DA GUARNIÇÃO</p>
+        <h1 class="scale-title" id="scaleTitle">
+          <span class="scale-pre">ESCALA DE</span>
+          <span class="scale-day" id="scaleDay"></span>
+          <span class="scale-date" id="scaleDate"></span>
+        </h1>
+        <div class="status-row">
+          <span class="status" id="scaleStatus" role="status"></span>
+          <span class="count" id="scaleCount"></span>
+        </div>
+        <div class="bar" aria-hidden="true"><span id="scaleBar"></span></div>
+      </article>
+
+      <div class="notice hidden" id="notice" role="status" aria-live="polite"></div>
+
+      <div id="slotsHome" class="slots" aria-live="polite"></div>
+
+      <div class="actions">
+        <button class="btn btn-primary btn-block" type="button" id="btnShareScale">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M16 6l-4-4-4 4M12 2v13"/></svg>
+          COMPARTILHAR ESCALA
+        </button>
+        <div class="grid2">
+          <a class="btn btn-ghost" href="#historico">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8M3 3v5h5M12 7v5l3 3"/></svg>
+            HISTÓRICO
+          </a>
+          <a class="btn btn-ghost" href="#" id="btnToday">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v15H4zM4 9h16M8 3v4M16 3v4"/></svg>
+            ESCALA DE HOJE
+          </a>
+        </div>
+      </div>
+
+      <section class="card group-card" aria-labelledby="grpTitle">
+        <p class="eyebrow" id="grpTitle">GRUPO OFICIAL</p>
+        <p class="muted">Utilize o grupo para avisos e comunicação entre os militares.</p>
+        <a class="btn btn-wa btn-block" id="btnWhats" target="_blank" rel="noopener"
+           href="https://chat.whatsapp.com/CT5EigeEZAr36FZMgSYE2r?s=cl&amp;p=i&amp;mlu=4&amp;ilr=4">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8.5 8.5 0 01-12.6 7.4L3.5 20l1.2-3.7A8.5 8.5 0 1120 11.5z"/></svg>
+          ENTRAR NO GRUPO DO WHATSAPP
+        </a>
+      </section>
+
+      <button class="btn btn-ghost btn-block" type="button" id="btnShareApp">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
+        COMPARTILHAR SISTEMA
+      </button>
+    </section>
+
+    <section id="view-history" class="view hidden" aria-labelledby="histTitle">
+      <p class="eyebrow">CONSULTA</p>
+      <h1 class="h-title" id="histTitle">Histórico de escalas</h1>
+      <p class="muted">Escalas anteriores, somente para consulta.</p>
+      <ul class="hist-list" id="histList"></ul>
+    </section>
+
+    <section id="view-detail" class="view hidden">
+      <a href="#historico" class="back">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+        Histórico
+      </a>
+      <article class="card scale-card">
+        <p class="eyebrow">LISTA DA GUARNIÇÃO</p>
+        <h1 class="scale-title">
+          <span class="scale-pre">ESCALA DE</span>
+          <span class="scale-day" id="detDay"></span>
+          <span class="scale-date" id="detDate"></span>
+        </h1>
+        <div class="status-row">
+          <span class="status" id="detStatus"></span>
+          <span class="count" id="detCount"></span>
+        </div>
+        <p class="muted small" id="detFill"></p>
+      </article>
+      <div id="slotsDetail" class="slots"></div>
+      <button class="btn btn-ghost btn-block" type="button" id="btnShareDetail">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7M16 6l-4-4-4 4M12 2v13"/></svg>
+        COMPARTILHAR ESTA ESCALA
+      </button>
+    </section>
+
+    <section id="view-admin" class="view hidden" aria-labelledby="admTitle">
+      <p class="eyebrow">ADMINISTRAÇÃO</p>
+      <h1 class="h-title" id="admTitle">Militares cadastrados</h1>
+      <p class="muted">Bloqueie militares e remova vagas pela própria escala (botão REMOVER).</p>
+      <div class="adm-stats" id="admStats"></div>
+      <label class="field">
+        <span>Buscar</span>
+        <input id="admSearch" type="search" placeholder="Nome de guerra" autocomplete="off">
+      </label>
+      <ul class="user-list" id="userList"></ul>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span class="footer-line" aria-hidden="true"></span>
+    <p>Sistema desenvolvido por <strong>SD EV RIQUELME</strong></p>
+  </footer>
+
+  <dialog id="modal" aria-labelledby="modalTitle" aria-describedby="modalText">
+    <form method="dialog" class="modal-box">
+      <p class="eyebrow" id="modalEyebrow">CONFIRMAÇÃO</p>
+      <h2 id="modalTitle"></h2>
+      <p id="modalText" class="muted"></p>
+      <div class="grid2">
+        <button class="btn btn-ghost" value="cancel" type="submit">CANCELAR</button>
+        <button class="btn btn-primary" value="ok" type="submit" id="modalOk">CONFIRMAR</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="assertive" aria-atomic="false"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
