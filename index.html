@@ -42,6 +42,10 @@
     </nav>
   </header>
 
+  <div class="updbar hidden" id="updbar" role="status">
+    <span>Nova versão disponível!</span>
+    <button type="button" class="btn btn-primary btn-sm" id="updBtn">ATUALIZAR</button>
+  </div>
   <div class="netbar hidden" id="netbar" role="status">Sem conexão — exibindo dados salvos. Reservas exigem internet.</div>
 
   <main id="main" tabindex="-1">
@@ -87,6 +91,10 @@
               </label>
             </div>
           </fieldset>
+          <label class="field hidden" id="regSenhaWrap">
+            <span>Senha do ADM</span>
+            <input id="regSenha" name="senha" type="password" inputmode="numeric" autocomplete="current-password" maxlength="64">
+          </label>
           <p class="form-error hidden" id="regError" role="alert"></p>
           <button class="btn btn-primary btn-block" type="submit" id="regSubmit">ENTRAR NO SISTEMA</button>
         </form>

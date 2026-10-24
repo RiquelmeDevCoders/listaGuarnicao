@@ -81,6 +81,11 @@ svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width:
 }
 .navbtn svg { width: 16px; height: 16px; }
 
+.updbar {
+  display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 16px; background: #1f2a14; border-bottom: 1px solid var(--olive-2);
+  color: var(--accent); font-weight: 800; font-size: 14px; letter-spacing: .04em;
+}
 .netbar {
   background: #3b2f12; color: #f6dc9c; text-align: center; font-size: 13px;
   padding: 8px 16px; border-bottom: 1px solid #5a481c;
@@ -253,32 +258,41 @@ main {
 .shift-name { font-size: 14px; font-weight: 800; letter-spacing: .16em; color: var(--text); margin: 0; }
 .shift-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 
-.slot {
-  display: grid; grid-template-columns: 52px 1fr auto; align-items: center; gap: 12px;
-  min-height: 68px; padding: 8px 8px 8px 8px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+.post {
+  display: grid; grid-template-columns: 52px 1fr; gap: 10px; align-items: stretch;
+  padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
 }
 .slot-post {
-  display: grid; place-items: center; height: 50px; border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 50px; border-radius: 8px;
   font: 900 17px var(--mono); letter-spacing: .02em;
   background: var(--bg-2); border: 1px solid var(--line-2); color: var(--sand);
+}
+.slot-post small { font: 800 8px var(--sans); letter-spacing: .12em; color: var(--muted); }
+.post.double .slot-post { background: rgba(205, 191, 145, .08); border-color: rgba(205, 191, 145, .35); }
+.seats { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; min-width: 0; }
+.slot {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px;
+  min-height: 52px; padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2);
 }
 .slot-body { min-width: 0; }
 .slot-state {
   display: block; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
 }
-.slot-name { display: block; font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slot-name { display: block; font-size: 15px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slot-name .om { color: var(--sand); font-weight: 600; }
 
 .slot.free { border-style: dashed; border-color: rgba(181, 209, 106, .35); }
 .slot.free .slot-state { color: var(--accent); }
 .slot.free .slot-name { color: var(--muted); font-weight: 500; }
-.slot.taken .slot-post { color: var(--muted); }
-.slot.mine { border-color: var(--accent); background: linear-gradient(90deg, rgba(181, 209, 106, .14), var(--surface) 70%); }
-.slot.mine .slot-post { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.slot.mine { border-color: var(--accent); background: linear-gradient(90deg, rgba(181, 209, 106, .16), var(--bg-2) 75%); }
+.post:has(.slot.mine) { border-color: rgba(181, 209, 106, .5); }
+.post:has(.slot.mine) .slot-post { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.post:has(.slot.mine) .slot-post small { color: var(--accent-ink); }
 .slot.mine .slot-state { color: var(--accent); }
 
-.slot .btn { min-height: 48px; padding: 0 14px; font-size: 13px; }
+.slot .btn { min-height: 46px; padding: 0 14px; font-size: 13px; }
 .lock {
   display: inline-flex; align-items: center; gap: 4px; padding: 0 8px;
   color: var(--muted); font: 800 11px var(--sans); letter-spacing: .12em;
@@ -334,7 +348,8 @@ dialog[open] { animation: pop .16s ease-out; }
 @keyframes pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
 .modal-box { padding: 22px 18px 18px; }
 .modal-box h2 { margin: 0 0 8px; font-size: 21px; line-height: 1.25; }
-.modal-box .muted { margin-bottom: 18px; }
+.modal-box .muted { margin-bottom: 18px; white-space: pre-line; }
+.grid2.single { grid-template-columns: 1fr; }
 
 .toasts {
   position: fixed; left: 0; right: 0; bottom: calc(14px + var(--safe-b)); z-index: 100;
@@ -372,8 +387,9 @@ dialog[open] { animation: pop .16s ease-out; }
 
 @media (max-width: 360px) {
   main { padding: 12px 12px 20px; }
-  .slot { grid-template-columns: 44px 1fr auto; gap: 8px; }
-  .slot-post { height: 44px; font-size: 15px; }
+  .post { grid-template-columns: 40px 1fr; gap: 6px; padding: 6px; }
+  .slot { gap: 6px; padding-left: 8px; }
+  .slot-post { font-size: 14px; }
   .slot .btn { padding: 0 10px; font-size: 12px; letter-spacing: .06em; }
   .brand span { display: none; }
   .navbtn span { display: none; }
@@ -381,7 +397,7 @@ dialog[open] { animation: pop .16s ease-out; }
 
 @media (min-width: 720px) {
   main { padding-top: 28px; }
-  .slot { min-height: 72px; }
+  .slot { min-height: 56px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

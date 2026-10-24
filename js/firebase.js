@@ -5,9 +5,9 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   doc, getDoc, getDocFromServer, getDocs, updateDoc, onSnapshot, writeBatch,
-  runTransaction, serverTimestamp, collection, query, where, orderBy, limit,
-  documentId
+  runTransaction, serverTimestamp, collection, query, orderBy, limit
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
+import { keysFor, emptySlots } from './escala.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCL8IFluqGulij4CPkzkwxWetuK6wNZK8M",
@@ -18,7 +18,6 @@ const firebaseConfig = {
   appId: "1:494052483911:web:cd5a456433c2612961e262"
 };
 
-export const SLOT_KEYS = ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
 export const ADMIN_NAME = 'RIQUELME';
 
 const app = initializeApp(firebaseConfig);
@@ -43,8 +42,15 @@ export class AppError extends Error {
 const userRef = (uid) => doc(db, 'users', uid);
 const scaleRef = (id) => doc(db, 'escalas', id);
 const adminRef = () => doc(db, 'config', 'admin');
+const adminDeviceRef = (uid) => doc(db, 'admins', uid);
 
-const emptySlots = () => Object.fromEntries(SLOT_KEYS.map((k) => [k, null]));
+const withEmpty = (id, slots) => ({ ...emptySlots(id), ...(slots || {}) });
+
+export async function hashSenha(senha) {
+  const data = new TextEncoder().encode(`escala-sd-ev|${senha}`);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 const withTimeout = (p, ms) => Promise.race([
   p,
@@ -83,21 +89,27 @@ export function watchProfile(uid, cb) {
   return onSnapshot(userRef(uid), (s) => cb(s.exists() ? s.data() : null), () => {});
 }
 
-export async function getAdminUid() {
+export async function checkAdmin(uid) {
   try {
     const s = await getDoc(adminRef());
-    return s.exists() ? s.data().uid : null;
+    if (s.exists() && s.data().uid === uid) return true;
+    const d = await getDoc(adminDeviceRef(uid));
+    return d.exists();
   } catch {
-    return null;
+    return false;
   }
 }
 
-export async function registerUser(uid, nome, om) {
+export async function registerUser(uid, nome, om, senha = '') {
   const batch = writeBatch(db);
   if (nome === ADMIN_NAME) {
     const adm = await getDocFromServer(adminRef());
-    if (adm.exists() && adm.data().uid !== uid) throw new AppError('reserved');
-    if (!adm.exists()) batch.set(adminRef(), { uid, createdAt: serverTimestamp() });
+    if (!adm.exists()) {
+      batch.set(adminRef(), { uid, createdAt: serverTimestamp() });
+    } else if (adm.data().uid !== uid) {
+      if (!senha) throw new AppError('needpass');
+      batch.set(adminDeviceRef(uid), { prova: await hashSenha(senha), createdAt: serverTimestamp() });
+    }
   }
   batch.set(userRef(uid), {
     nome, om,
@@ -105,7 +117,12 @@ export async function registerUser(uid, nome, om) {
     lastSeen: serverTimestamp(),
     bloqueado: false
   });
-  await withTimeout(batch.commit(), 15000);
+  try {
+    await withTimeout(batch.commit(), 15000);
+  } catch (e) {
+    if (nome === ADMIN_NAME && senha && e && e.code === 'permission-denied') throw new AppError('badpass');
+    throw e;
+  }
 }
 
 export async function syncServerClock(uid) {
@@ -121,14 +138,15 @@ export function watchScale(id, cb, onErr) {
   return onSnapshot(scaleRef(id), (s) => {
     cb({
       exists: s.exists(),
-      slots: s.exists() ? { ...emptySlots(), ...s.data().slots } : emptySlots(),
+      slots: withEmpty(id, s.exists() ? s.data().slots : null),
       fromCache: s.metadata.fromCache
     });
   }, onErr);
 }
 
 export async function reserveSlot(id, key, uid, profile) {
-  if (!SLOT_KEYS.includes(key)) throw new AppError('invalid');
+  const keys = keysFor(id);
+  if (!keys.includes(key)) throw new AppError('invalid');
   const ref = scaleRef(id);
   const slot = { uid, nome: profile.nome, om: profile.om, em: serverTimestamp() };
   await runTransaction(db, async (tx) => {
@@ -137,12 +155,12 @@ export async function reserveSlot(id, key, uid, profile) {
       tx.set(ref, {
         data: id,
         createdAt: serverTimestamp(),
-        slots: { ...emptySlots(), [key]: slot }
+        slots: { ...emptySlots(id), [key]: slot }
       });
       return;
     }
-    const slots = { ...emptySlots(), ...snap.data().slots };
-    if (SLOT_KEYS.some((k) => slots[k] && slots[k].uid === uid)) throw new AppError('already');
+    const slots = withEmpty(id, snap.data().slots);
+    if (Object.keys(slots).some((k) => slots[k] && slots[k].uid === uid)) throw new AppError('already');
     if (slots[key]) throw new AppError('taken');
     tx.update(ref, { [`slots.${key}`]: slot });
   });
@@ -152,7 +170,7 @@ export async function releaseSlot(id, key, uid) {
   const ref = scaleRef(id);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    const cur = snap.exists() ? snap.data().slots[key] : null;
+    const cur = snap.exists() ? snap.data().slots[key] || null : null;
     if (!cur || cur.uid !== uid) throw new AppError('notmine');
     tx.update(ref, { [`slots.${key}`]: null });
   });
@@ -164,18 +182,23 @@ export async function adminRemoveSlot(id, key) {
 
 export async function getScale(id) {
   const s = await getDoc(scaleRef(id));
-  return s.exists() ? { ...emptySlots(), ...s.data().slots } : null;
+  return s.exists() ? withEmpty(id, s.data().slots) : null;
 }
 
 export async function listHistory(beforeId, max = 120) {
-  const q = query(
-    collection(db, 'escalas'),
-    where(documentId(), '<', beforeId),
-    orderBy(documentId(), 'desc'),
-    limit(max)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, slots: { ...emptySlots(), ...d.data().slots } }));
+  const toItems = (docs) => docs
+    .map((d) => ({ id: d.id, slots: withEmpty(d.id, d.data().slots) }))
+    .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.id) && x.id < beforeId)
+    .sort((a, b) => (a.id < b.id ? 1 : -1))
+    .slice(0, max);
+  try {
+    const snap = await withTimeout(getDocs(query(collection(db, 'escalas'), orderBy('data', 'desc'), limit(max + 5))), 15000);
+    return toItems(snap.docs);
+  } catch (e) {
+    console.warn('Histórico: consulta ordenada falhou, usando leitura simples.', e);
+    const snap = await withTimeout(getDocs(collection(db, 'escalas')), 15000);
+    return toItems(snap.docs);
+  }
 }
 
 export async function listUsers() {

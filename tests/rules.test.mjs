@@ -9,9 +9,11 @@ import {
   serverTimestamp, runTransaction, Timestamp
 } from 'firebase/firestore';
 import { nextScaleId, todayId, addDays, openingMs } from '../js/time.js';
+import { emptySlots } from '../js/escala.js';
+import { createHash } from 'node:crypto';
 
-const SLOT_KEYS = ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
-const empty = () => Object.fromEntries(SLOT_KEYS.map((k) => [k, null]));
+const empty = (id = TOMORROW) => emptySlots(id);
+const hash = (senha) => createHash('sha256').update(`escala-sd-ev|${senha}`).digest('hex');
 
 const NOW = Date.now();
 const TOMORROW = nextScaleId(NOW);
@@ -35,7 +37,7 @@ async function seedUser(uid, nome, om = 'CIA C', bloqueado = false) {
 async function seedScale(id, slots = {}) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'escalas', id), {
-      data: id, createdAt: Timestamp.now(), slots: { ...empty(), ...slots }
+      data: id, createdAt: Timestamp.now(), slots: { ...empty(id), ...slots }
     });
   });
 }
@@ -228,4 +230,40 @@ test('coleções desconhecidas são bloqueadas', async () => {
   await seedUser('a', 'SILVA');
   await assertFails(setDoc(doc(db('a'), 'qualquer', 'x'), { a: 1 }));
   await assertFails(getDoc(doc(db('a'), 'qualquer', 'x')));
+});
+
+test('ADM em outro aparelho com senha', async () => {
+  await seedAdmin('adm');
+  await seedUser('a', 'SILVA');
+
+  const tryClaim = async (uid, senha) => {
+    const fs = db(uid);
+    const b = writeBatch(fs);
+    b.set(doc(fs, 'admins', uid), { prova: hash(senha), createdAt: serverTimestamp() });
+    b.set(doc(fs, 'users', uid), newUser('RIQUELME'));
+    return b.commit();
+  };
+  await assertFails(tryClaim('cel2', '1234'));
+  await assertSucceeds(tryClaim('cel2', '2511'));
+  await assertSucceeds(getDocs(collection(db('cel2'), 'users')));
+  await seedScale(TODAY, { h1p1: stored('a', 'SILVA') });
+  await assertSucceeds(updateDoc(doc(db('cel2'), 'escalas', TODAY), { 'slots.h1p1': null }));
+  const fs = db('cel3');
+  const b = writeBatch(fs);
+  b.set(doc(fs, 'admins', 'cel3'), { prova: hash('2511'), createdAt: serverTimestamp() });
+  b.set(doc(fs, 'users', 'cel3'), newUser('SOUZA'));
+  await assertFails(b.commit());
+  await assertFails(deleteDoc(doc(db('cel2'), 'admins', 'cel2')));
+});
+
+test('posto duplo: 2 militares no mesmo posto, nunca 3', { skip: !OPEN && 'fora do horário de abertura' }, async () => {
+  await seedUser('a', 'SILVA');
+  await seedUser('b', 'SOUZA', 'PE');
+  await seedUser('c', 'COSTA');
+  await seedScale(TOMORROW);
+  await assertSucceeds(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h1p1': slot('a', 'SILVA') }));
+  await assertSucceeds(updateDoc(doc(db('b'), 'escalas', TOMORROW), { 'slots.h1p1b': slot('b', 'SOUZA', 'PE') }));
+  await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), { 'slots.h1p1b': slot('c', 'COSTA') }));
+  await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), { 'slots.h1p1c': slot('c', 'COSTA') }));
+  await assertFails(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h2p2b': slot('a', 'SILVA') }));
 });

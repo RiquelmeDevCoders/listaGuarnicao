@@ -1,18 +1,18 @@
+import { emptySlots } from './escala.js';
 const M = window.__MOCK || {};
-export const SLOT_KEYS = ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
 export const ADMIN_NAME = 'RIQUELME';
 export class AppError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
 }
 const ts = (ms) => ({ toMillis: () => ms });
-const empty = () => Object.fromEntries(SLOT_KEYS.map((k) => [k, null]));
-const store = { users: M.users || {}, escalas: M.escalas || {}, admin: M.admin || null };
+const empty = (id) => emptySlots(id);
+const store = { users: M.users || {}, escalas: M.escalas || {}, admin: M.admin || null, devices: M.devices || [], secret: M.secret || '2511' };
 const listeners = new Map();
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const uid0 = M.uid || 'me';
 function emit(id) {
   const cb = listeners.get(id);
-  if (cb) cb({ exists: !!store.escalas[id], slots: { ...empty(), ...(store.escalas[id] || {}) }, fromCache: false });
+  if (cb) cb({ exists: !!store.escalas[id], slots: { ...empty(id), ...(store.escalas[id] || {}) }, fromCache: false });
 }
 window.__mock = {
   store,
@@ -23,12 +23,16 @@ window.__mock = {
 export async function ensureAuth() { return { uid: uid0 }; }
 export async function getProfile(uid) { return store.users[uid] || null; }
 export function watchProfile(uid, cb) { window.__mock.profileCb = cb; return () => {}; }
-export async function getAdminUid() { return store.admin; }
-export async function registerUser(uid, nome, om) {
+export async function checkAdmin(uid) { return store.admin === uid || store.devices.includes(uid); }
+export async function registerUser(uid, nome, om, senha = '') {
   await delay(100);
   if (nome === ADMIN_NAME) {
-    if (store.admin && store.admin !== uid) throw new AppError('reserved');
-    store.admin = uid;
+    if (!store.admin) store.admin = uid;
+    else if (store.admin !== uid) {
+      if (!senha) throw new AppError('needpass');
+      if (senha !== store.secret) throw new AppError('badpass');
+      store.devices.push(uid);
+    }
   }
   store.users[uid] = { nome, om, bloqueado: false, createdAt: ts(Date.now()), lastSeen: ts(Date.now()) };
 }
@@ -52,10 +56,10 @@ export async function releaseSlot(id, key, uid) {
   window.__mock.clear(id, key);
 }
 export async function adminRemoveSlot(id, key) { window.__mock.clear(id, key); }
-export async function getScale(id) { return store.escalas[id] ? { ...empty(), ...store.escalas[id] } : null; }
+export async function getScale(id) { return store.escalas[id] ? { ...empty(id), ...store.escalas[id] } : null; }
 export async function listHistory(beforeId) {
   return Object.keys(store.escalas).filter((k) => k < beforeId).sort().reverse()
-    .map((id) => ({ id, slots: { ...empty(), ...store.escalas[id] } }));
+    .map((id) => ({ id, slots: { ...empty(id), ...store.escalas[id] } }));
 }
 export async function listUsers() {
   return Object.entries(store.users).map(([uid, u]) => ({ uid, createdAt: ts(Date.now()), lastSeen: ts(Date.now()), ...u }))

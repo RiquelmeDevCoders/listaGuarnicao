@@ -77,10 +77,10 @@ export const STATUS = {
   CLOSED: 'ENCERRADA'
 };
 
-export function scaleStatus(scaleId, nowMs, filled) {
+export function scaleStatus(scaleId, nowMs, filled, capacity = 9) {
   if (nowMs >= closingMs(scaleId)) return STATUS.CLOSED;
   if (nowMs < openingMs(scaleId)) return STATUS.WAITING;
-  return filled >= 9 ? STATUS.FULL : STATUS.OPEN;
+  return filled >= capacity ? STATUS.FULL : STATUS.OPEN;
 }
 
 export function formatBR(id) {

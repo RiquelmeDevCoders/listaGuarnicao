@@ -16,6 +16,9 @@ css/style.css           visual militar, mobile first
 js/app.js               interface, rotas (#historico, #admin), regras de tela
 js/firebase.js          configuração do Firebase e todas as operações no banco
 js/time.js              datas e horários em America/Sao_Paulo
+js/escala.js            vagas da escala (posto duplo)
+js/versao.js            versão atual e mensagem de novidades
+version.json            versão publicada (avisa quem está com versão antiga)
 manifest.json           PWA (nome, ícones, tela cheia)
 sw.js                   service worker (abre rápido e funciona sem sinal para consulta)
 icons/                  ícones do app
@@ -39,14 +42,19 @@ escalas/{AAAA-MM-DD}               uma escala por dia (o ID é a data da escala)
   data        "2026-10-05"
   createdAt   timestamp do servidor
   slots
-    h1p1 … h3p3                    9 vagas (1º/2º/3º horário × P1/P2/P3)
+    h1p1 … h3p3                    vaga 1 de cada posto (1º/2º/3º horário × P1/P2/P3)
+    h1p1b … h3p3b                  vaga 2 de cada posto (posto duplo)
       null                         vaga livre
       { uid, nome, om, em }        vaga ocupada (em = horário do servidor)
 
 config/admin
-  uid         uid do SD EV RIQUELME
+  uid         uid do aparelho principal do SD EV RIQUELME
   createdAt
+
+admins/{uid}                       outros aparelhos do ADM, liberados com a senha do ADM
 ```
+
+**Posto duplo:** todo posto tem 2 vagas (18 por escala). Escalas antigas, anteriores a 25/10/2026, foram feitas com 9 vagas e aparecem assim no histórico (`DOUBLE_FROM` em `js/escala.js`, usado só para exibição).
 
 As 9 vagas ficam num único documento: uma leitura mostra a escala inteira, o tempo real é um único listener e a concorrência é resolvida numa transação sobre um documento só. O histórico são os próprios documentos de `escalas` com data anterior; não há cópia duplicada.
 
@@ -67,7 +75,14 @@ As 9 vagas ficam num único documento: uma leitura mostra a escala inteira, o te
 2. *Source*: **Deploy from a branch** → Branch **main** / pasta **/(root)** → Save.
 3. Em 1–2 minutos o sistema fica em: **https://riquelmedevcoders.github.io/listaGuarni-o/**
 
-Para atualizar: faça commit/push na `main`. Ao mudar arquivos, aumente a versão em `sw.js` (`escala-sdev-v1` → `v2`) para os celulares pegarem a versão nova.
+Para lançar uma versão nova:
+
+1. Aumente a versão em **`js/versao.js`** (`APP_VERSION`) e em **`version.json`** — os dois iguais.
+2. Escreva o recado em `NOVIDADES` (`js/versao.js`).
+3. Aumente o cache em `sw.js` (`escala-sdev-v3` → `v4`).
+4. Commit e push na `main`.
+
+Quem estiver com o app aberto vê a faixa **“Nova versão disponível! ATUALIZAR”**; ao entrar na versão nova, cada militar vê o recado uma única vez.
 
 Alternativa: Firebase Hosting (também gratuito) com `npx firebase deploy --only hosting,firestore:rules` — publica o site e as regras de uma vez.
 
@@ -79,7 +94,13 @@ Alternativa: Firebase Hosting (também gratuito) com `npx firebase deploy --only
 
 A partir daí o nome **RIQUELME** fica reservado: ninguém mais consegue se cadastrar com ele, e o documento `config/admin` não pode ser alterado nem apagado pelo app.
 
-**Trocou de celular ou limpou os dados do navegador?** O login é anônimo e fica preso ao navegador. Para transferir o admin: cadastre-se no aparelho novo com outro nome provisório (ex.: `RIQUELME ADM`), copie o `uid` do seu novo documento em `users` no console, e cole em `config/admin.uid`. Se quiser, edite também o `nome` desse usuário para `RIQUELME` direto no console.
+**Entrar como ADM em outro aparelho (senha):**
+
+No aparelho novo, cadastre-se como **RIQUELME**. O sistema pede a **Senha do ADM** (senha padrão, não precisa cadastrar); com a senha certa, esse aparelho também vira ADM. Quem não sabe a senha não consegue usar o nome RIQUELME.
+
+A senha fica gravada nas regras do Firestore como hash SHA-256 (função `adminPassHash()` em `firestore.rules`). Para trocar: gere o SHA-256 de `escala-sd-ev|NOVASENHA`, substitua o valor ali e publique as regras de novo.
+
+Perdeu todos os aparelhos ADM? No console do Firebase, em `config/admin`, troque `uid` pelo `uid` do seu novo cadastro (documento em `users`).
 
 ## 6. Como o sistema funciona
 
@@ -89,7 +110,8 @@ A partir daí o nome **RIQUELME** fica reservado: ninguém mais consegue se cada
 - **Fechamento:** à meia-noite (Brasília) a escala vira histórico, somente leitura, e a tela passa a mostrar a próxima.
 - **Escolha:** ESCOLHER → “Você deseja assumir o 2º horário, P2?” → CONFIRMAR. A gravação é uma transação no Firestore. Se outro militar confirmou antes, aparece “Essa vaga acabou de ser ocupada por outro militar. Escolha outra disponível.”
 - **Uma vaga por militar:** quem já está escalado vê “Você já está escalado nesta escala.”, a própria vaga destacada e o botão **CANCELAR / TROCAR MINHA VAGA** (a vaga volta a ficar livre na hora).
-- **Status:** AGUARDANDO LIBERAÇÃO, ABERTA, PREENCHIDA (9/9) e ENCERRADA. Sempre com texto, não só cor.
+- **Posto duplo:** cada posto mostra VAGA 1 e VAGA 2; dois militares podem tirar o mesmo posto, cada um em uma vaga.
+- **Status:** AGUARDANDO LIBERAÇÃO, ABERTA, PREENCHIDA (18/18; 9/9 nas escalas antigas) e ENCERRADA. Sempre com texto, não só cor.
 - **Tempo real:** todos veem as mudanças em ~1 segundo.
 - **Histórico:** lista por data (“04/10/2026 — Escala de 05/10/2026”). Ao tocar, abre a escala completa, somente leitura. O botão **ESCALA DE HOJE** abre direto a escala em andamento.
 - **Compartilhar escala:** gera a mensagem pronta (LISTA DA GUARNIÇÃO / 1º HORÁRIO / P1 - …) e abre o compartilhamento do celular; sem suporte, abre o WhatsApp Web e copia o texto.
@@ -126,7 +148,8 @@ Todas validadas **no servidor** (Firestore Security Rules). Nada depende só do 
 | Excluir dados | `delete` proibido para todos |
 | Mudar nome/OM/bloqueio próprio | Militar só atualiza `lastSeen` do próprio perfil |
 | Ver dados de outros militares | `users` só é lido pelo dono e pelo admin |
-| Virar admin / usar o nome RIQUELME | `config/admin` só é criado uma vez, junto com o cadastro RIQUELME; nunca é alterado pelo app |
+| Virar admin / usar o nome RIQUELME | `config/admin` só é criado uma vez; outro aparelho só vira ADM enviando o hash correto da senha junto com o cadastro RIQUELME |
+| Terceiro militar no posto duplo | Cada vaga (`h1p1`, `h1p1b`) aceita só 1 militar; não existe terceira chave |
 | Usuário bloqueado | Não reserva nem cancela |
 | Qualquer outra coleção | Bloqueada (`allow read, write: if false`) |
 | Nome com HTML/script | Nome aceita só letras maiúsculas e espaço; o app também escapa todo texto exibido |
@@ -136,6 +159,7 @@ Todas validadas **no servidor** (Firestore Security Rules). Nada depende só do 
 - **Identidade:** o login anônimo identifica o **aparelho/navegador**, não a pessoa. Alguém pode limpar os dados do navegador, criar outro cadastro e se escalar com outro nome. Mitigação: o nome e a OM aparecem na escala para todos, e o admin pode remover e bloquear. Para identidade forte seria preciso login com Google/telefone (o de telefone tem custo).
 - **Nomes repetidos:** dois militares podem se cadastrar com o mesmo nome de guerra (a OM ajuda a diferenciar).
 - **Horário de verão:** as regras usam Brasília = UTC−3 (sem horário de verão desde 2019). Se voltar, ajuste os valores `3h`/`5h` em `firestore.rules` e `BRT_OFFSET_H` em `js/time.js`.
+- **Senha curta e pública:** a senha do ADM tem 4 dígitos e o hash dela está no `firestore.rules`, que fica público no GitHub. Alguém com conhecimento técnico consegue descobri-la testando as 10 mil combinações. Para mais segurança, troque por uma senha maior (veja acima) ou deixe o repositório privado.
 - **Abuso de cota:** sem App Check, alguém mal-intencionado poderia gerar leituras em massa. O plano gratuito permite 50 mil leituras e 20 mil gravações por dia, muito acima do uso normal. Se necessário, ative o **App Check com reCAPTCHA v3** (gratuito).
 - O relógio do celular só afeta o que é **exibido** até o app sincronizar com o servidor; a decisão final é sempre do servidor.
 

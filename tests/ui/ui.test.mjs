@@ -15,6 +15,11 @@ before(async () => {
   await mkdir(SHOTS, { recursive: true });
   server = http.createServer(async (req, res) => {
     const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    if (p === '/version.json' && server.fakeVersion) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ version: server.fakeVersion }));
+      return;
+    }
     const file = p === '/js/firebase.js' ? 'tests/ui/mock-firebase.js' : (p === '/' ? 'index.html' : p.slice(1));
     try {
       const body = await readFile(path.join(ROOT, file));
@@ -39,6 +44,7 @@ async function open(mock, { width = 390, height = 844, at } = {}) {
     m.offset = m.at ? m.at - Date.now() : 0;
     window.__MOCK = m;
     window.__shared = [];
+    if (!m.showNovidades && !sessionStorage.getItem('keep')) localStorage.setItem('escala-sdev-versao-vista', '2.0.0');
   }, { ...mock, at });
   await page.goto(base);
   page.errors = errors;
@@ -226,13 +232,32 @@ test('administrador: painel, bloqueio e remoção; nome reservado', async () => 
   await page.waitForSelector('.user.blocked');
   await page.context().close();
 
-  const p2 = await open({ uid: 'me', admin: 'outro' }, { at: brt(2026, 10, 4, 19) });
+  const p2 = await open({ uid: 'me', admin: 'outro', secret: '2511' }, { at: brt(2026, 10, 4, 19) });
   await p2.waitForSelector('#view-register:not(.hidden)');
+  assert.equal(await p2.locator('#regSenhaWrap.hidden').count(), 1);
   await p2.fill('#regNome', 'Riquelme');
   await p2.check('input[value="CIA C"]', { force: true });
   await p2.click('#regSubmit');
-  await p2.waitForFunction(() => document.querySelector('#regError').textContent.includes('reservado'));
+  await p2.waitForFunction(() => document.querySelector('#regError').textContent.includes('senha do ADM'));
+  assert.equal(await p2.locator('#regSenhaWrap.hidden').count(), 0);
+  await p2.fill('#regSenha', '1234');
+  await p2.click('#regSubmit');
+  await p2.waitForFunction(() => document.querySelector('#regError').textContent.includes('Senha incorreta'));
+  await p2.fill('#regSenha', '2511');
+  await p2.click('#regSubmit');
+  await p2.waitForSelector('#navAdmin:not(.hidden)');
+  await p2.click('#navAdmin');
+  await p2.waitForSelector('.user');
   await p2.context().close();
+
+  const p4 = await open({ uid: 'me', admin: 'outro', secret: '2511' }, { at: brt(2026, 10, 4, 19) });
+  await p4.waitForSelector('#view-register:not(.hidden)');
+  await p4.fill('#regNome', 'Silva');
+  await p4.check('input[value="PE"]', { force: true });
+  await p4.click('#regSubmit');
+  await p4.waitForSelector('#view-home:not(.hidden)');
+  assert.equal(await p4.locator('#navAdmin.hidden').count(), 1);
+  await p4.context().close();
 
   const p3 = await open(me(), { at: brt(2026, 10, 4, 19) });
   await p3.waitForSelector('[data-act="take"]');
@@ -242,4 +267,93 @@ test('administrador: painel, bloqueio e remoção; nome reservado', async () => 
   await p3.evaluate(() => window.__mock.setProfile({ bloqueado: true }));
   await p3.waitForFunction(() => document.querySelector('#notice').textContent.includes('bloqueado'));
   await p3.context().close();
+});
+
+test('posto duplo a partir de 25/10/2026: 2 militares por posto, 18 vagas', async () => {
+  const page = await open({ ...me(), escalas: { '2026-10-25': { h2p2: { uid: 'j', nome: 'JOÃO', om: 'CIA C' } } } }, { at: brt(2026, 10, 24, 18, 30) });
+  await page.waitForSelector('[data-act="take"]');
+  assert.equal(await page.textContent('#scaleDate'), '25/10/2026');
+  assert.match(await page.textContent('#scaleCount'), /1 de 18/);
+  assert.equal(await page.locator('#slotsHome .post.double').count(), 9);
+  assert.equal(await page.locator('#slotsHome .slot').count(), 18);
+  assert.ok(await page.locator('[data-key="h2p2b"]').count(), 'segunda vaga do P2 livre');
+  await page.click('[data-key="h2p2b"]');
+  assert.match(await page.textContent('#modalText'), /Posto duplo — vaga 2 de 2/);
+  await page.click('#modalOk');
+  await page.waitForSelector('.slot.mine');
+  assert.match(await page.textContent('#notice'), /2º HORÁRIO — P2 · VAGA 2/);
+  assert.match(await page.textContent('#scaleCount'), /2 de 18/);
+  assert.ok(await noHScroll(page));
+  await shot(page, '12-posto-duplo');
+  await page.evaluate(() => { navigator.share = async (d) => { window.__shared.push(d); }; });
+  await page.click('#btnShareScale');
+  const t = (await page.evaluate(() => window.__shared))[0].text;
+  assert.match(t, /\*2º HORÁRIO\*\nP1 - \nP1 - \nP2 - JOÃO \| CIA C\nP2 - SILVA \| CIA C\nP3 - \nP3 - /);
+  assert.match(t, /Vagas preenchidas: 2\/18/);
+  await page.context().close();
+
+  const small = await open({ ...me('MAGALHÃES BARBOSA'), escalas: { '2026-10-25': { h1p1: { uid: 'z', nome: 'FERNANDES ALBUQUERQUE', om: 'CIA C' } } } }, { width: 320, height: 568, at: brt(2026, 10, 24, 19) });
+  await small.waitForSelector('[data-act="take"]');
+  assert.ok(await noHScroll(small), 'rolagem horizontal em 320px');
+  await shot(small, '13-duplo-320');
+  await small.context().close();
+});
+
+test('posto duplo: escala cheia com 18 e histórico antigo segue com 9', async () => {
+  const keys = [];
+  for (let h = 1; h <= 3; h++) for (let p = 1; p <= 3; p++) keys.push(`h${h}p${p}`, `h${h}p${p}b`);
+  const full = Object.fromEntries(keys.map((k, i) => [k, { uid: 'x' + i, nome: 'MILITAR ' + 'ABCDEFGHIJKLMNOPQR'[i], om: 'PE' }]));
+  const page = await open({ ...me(), escalas: { '2026-10-25': full, '2026-10-24': { h1p1: { uid: 'a', nome: 'ALVES', om: 'PE' } } } }, { at: brt(2026, 10, 24, 20) });
+  await page.waitForFunction(() => document.querySelector('#scaleStatus').textContent === 'PREENCHIDA');
+  assert.match(await page.textContent('#notice'), /Todas as 18 vagas/);
+  await page.click('a[href="#historico"]');
+  await page.waitForSelector('.hist-item');
+  assert.match(await page.textContent('.hist-item'), /1\/9/);
+  await page.click('.hist-item');
+  await page.waitForSelector('#view-detail:not(.hidden) .slot');
+  assert.equal(await page.locator('#slotsDetail .slot').count(), 9);
+  assert.equal(await page.locator('#slotsDetail .post.double').count(), 0);
+  await page.context().close();
+});
+
+test('mensagem de nova versão aparece uma vez e aviso de atualização', async () => {
+  const page = await open({ ...me(), showNovidades: true }, { at: brt(2026, 10, 24, 19) });
+  await page.waitForSelector('#modal[open]');
+  assert.match(await page.textContent('#modalText'), /SD EV RIQUELME[\s\S]*DUPLO[\s\S]*parar de rodar na 24 KKKKKKKKKKK/);
+  assert.equal(await page.locator('#modal button[value="cancel"].hidden').count(), 1);
+  await shot(page, '14-novidades');
+  await page.click('#modalOk');
+  assert.equal(await page.locator('#modal[open]').count(), 0);
+  await page.evaluate(() => sessionStorage.setItem('keep', '1'));
+  await page.reload();
+  await page.waitForSelector('#slotsHome .slot');
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator('#modal[open]').count(), 0);
+  assert.equal(await page.locator('#updbar.hidden').count(), 1);
+  await page.context().close();
+
+  server.fakeVersion = '9.9.9';
+  const p2 = await open(me(), { at: brt(2026, 10, 24, 19) });
+  await p2.waitForSelector('#updbar:not(.hidden)');
+  assert.match(await p2.textContent('#updbar'), /Nova versão disponível/);
+  server.fakeVersion = null;
+  await p2.context().close();
+});
+
+test('histórico mostra escalas simples e duplas', async () => {
+  const page = await open({ ...me(), escalas: {
+    '2026-10-20': { h1p1: { uid: 'a', nome: 'ALVES', om: 'PE' } },
+    '2026-10-25': { h1p1: { uid: 'a', nome: 'ALVES', om: 'PE' }, h1p1b: { uid: 'b', nome: 'BRITO', om: 'CIA C' } }
+  } }, { at: brt(2026, 10, 26, 10) });
+  await page.waitForSelector('#slotsHome .slot');
+  await page.click('a[href="#historico"]');
+  await page.waitForSelector('.hist-item');
+  const items = await page.locator('.hist-item').allTextContents();
+  assert.equal(items.length, 2);
+  assert.match(items[0], /Escala de 25\/10\/2026[\s\S]*2\/18/);
+  assert.match(items[1], /Escala de 20\/10\/2026[\s\S]*1\/9/);
+  await page.click('a[href="#historico/2026-10-25"]');
+  await page.waitForSelector('#view-detail:not(.hidden) .post.double');
+  assert.match(await page.textContent('#slotsDetail'), /ALVES[\s\S]*BRITO/);
+  await page.context().close();
 });

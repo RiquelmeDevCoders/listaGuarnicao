@@ -1,8 +1,10 @@
 import {
-  SLOT_KEYS, ADMIN_NAME, AppError, ensureAuth, getProfile, watchProfile, getAdminUid,
+  ADMIN_NAME, AppError, ensureAuth, getProfile, watchProfile, checkAdmin,
   registerUser, syncServerClock, watchScale, reserveSlot, releaseSlot, adminRemoveSlot,
   getScale, listHistory, listUsers, setUserBlocked
 } from './firebase.js';
+import { isDouble, seatsOf, capacityOf, keyInfo } from './escala.js';
+import { APP_VERSION, NOVIDADES } from './versao.js';
 import {
   STATUS, todayId, nextScaleId, addDays, weekdayName, openingMs, scaleStatus,
   formatBR, formatClock, formatDateTime, formatCountdown, greeting, openingHour
@@ -60,9 +62,12 @@ const S = {
 const $ = (id) => document.getElementById(id);
 const now = () => Date.now() + S.offset;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const filledCount = (slots) => SLOT_KEYS.filter((k) => slots && slots[k]).length;
-const keyInfo = (k) => ({ h: +k[1], p: +k[3] });
-const mySlotKey = (slots) => SLOT_KEYS.find((k) => slots && slots[k] && slots[k].uid === S.uid) || null;
+const filledCount = (slots) => (slots ? Object.values(slots).filter(Boolean).length : 0);
+const mySlotKey = (slots) => (slots ? Object.keys(slots).find((k) => slots[k] && slots[k].uid === S.uid) : null) || null;
+const seatLabel = (id, k) => {
+  const { h, p, seat } = keyInfo(k);
+  return `${h}º horário, P${p}${isDouble(id) ? ` (vaga ${seat} de 2)` : ''}`;
+};
 const appUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
 
 function show(view) {
@@ -87,8 +92,10 @@ function toast(text, type = 'ok', ms = 3600) {
   }, ms);
 }
 
-function confirmModal({ title, text = '', ok = 'CONFIRMAR', eyebrow = 'CONFIRMAÇÃO', danger = false }) {
+function confirmModal({ title, text = '', ok = 'CONFIRMAR', eyebrow = 'CONFIRMAÇÃO', danger = false, single = false }) {
   const modal = $('modal');
+  modal.querySelector('button[value="cancel"]').classList.toggle('hidden', single);
+  modal.querySelector('.grid2').classList.toggle('single', single);
   $('modalTitle').textContent = title;
   $('modalText').textContent = text;
   $('modalEyebrow').textContent = eyebrow;
@@ -132,7 +139,7 @@ function errorMessage(e) {
   if (code === 'permission-denied') {
     if (S.profile && S.profile.bloqueado) return [MSG.blocked, 'err'];
     if (S.scaleId) {
-      const st = scaleStatus(S.scaleId, now(), filledCount(S.slots));
+      const st = currentStatus();
       if (st === STATUS.WAITING) return [MSG.notOpen, 'warn'];
       if (st === STATUS.CLOSED) return [MSG.closed, 'warn'];
     }
@@ -182,11 +189,13 @@ function scaleText(id, slots) {
   for (let h = 1; h <= 3; h++) {
     lines.push('', `*${h}º HORÁRIO*`);
     for (let p = 1; p <= 3; p++) {
-      const s = slots && slots[`h${h}p${p}`];
-      lines.push(`P${p} - ${s ? `${s.nome} | ${s.om}` : ''}`);
+      for (const k of seatsOf(id, h, p)) {
+        const s = slots && slots[k];
+        lines.push(`P${p} - ${s ? `${s.nome} | ${s.om}` : ''}`);
+      }
     }
   }
-  lines.push('', `Vagas preenchidas: ${filledCount(slots)}/9`, `Sistema: ${appUrl()}`);
+  lines.push('', `Vagas preenchidas: ${filledCount(slots)}/${capacityOf(id)}`, `Sistema: ${appUrl()}`);
   return lines.join('\n');
 }
 
@@ -208,20 +217,22 @@ function shareApp() {
   });
 }
 
-function slotHtml(key, slot, ctx) {
-  const { h, p } = keyInfo(key);
+function seatHtml(key, slot, ctx) {
+  const { h, p, seat } = keyInfo(key);
   const mine = slot && slot.uid === S.uid;
   const cls = !slot ? 'free' : mine ? 'mine' : 'taken';
-  const state = !slot ? 'Livre' : mine ? 'Sua vaga' : 'Ocupada';
+  const stateTxt = !slot ? 'Livre' : mine ? 'Sua vaga' : 'Ocupada';
+  const state = ctx.double ? `Vaga ${seat} · ${stateTxt}` : stateTxt;
   const name = slot
     ? `${esc(slot.nome)} <span class="om">| ${esc(slot.om)}</span>`
     : 'Disponível';
-  const label = `${h}º horário, P${p}: ${slot ? `${slot.nome}, ${slot.om}` : 'disponível'}`;
+  const where = `${h}º horário, P${p}${ctx.double ? `, vaga ${seat}` : ''}`;
+  const label = `${where}: ${slot ? `${slot.nome}, ${slot.om}` : 'disponível'}`;
   let action = '';
   if (!slot) {
     if (ctx.live && (ctx.status === STATUS.OPEN)) {
       const blocked = ctx.hasMine || (S.profile && S.profile.bloqueado);
-      action = `<button type="button" class="btn ${blocked ? 'btn-ghost' : 'btn-primary'}" data-act="take" data-key="${key}" aria-label="Escolher ${h}º horário, P${p}">ESCOLHER</button>`;
+      action = `<button type="button" class="btn ${blocked ? 'btn-ghost' : 'btn-primary'}" data-act="take" data-key="${key}" aria-label="Escolher ${where}">ESCOLHER</button>`;
     } else if (ctx.live && ctx.status === STATUS.WAITING) {
       action = `<span class="lock">${ICONS.clock}AGUARDE</span>`;
     }
@@ -234,21 +245,25 @@ function slotHtml(key, slot, ctx) {
     action = `<button type="button" class="btn btn-danger btn-sm" data-act="admrm" data-key="${key}" aria-label="Remover ${esc(slot.nome)} da vaga">REMOVER</button>`;
   }
   return `<li class="slot ${cls}" aria-label="${esc(label)}">
-    <span class="slot-post" aria-hidden="true">P${p}</span>
     <span class="slot-body"><span class="slot-state">${state}</span><span class="slot-name">${name}</span></span>
     ${action}
   </li>`;
 }
 
-function renderSlots(container, slots, ctx) {
+function renderSlots(container, slots, ctx, id) {
+  const double = isDouble(id);
+  const c = { ...ctx, double };
   let html = '';
   for (let h = 1; h <= 3; h++) {
     html += `<section class="shift" aria-label="${SHIFT_NAMES[h - 1]}">
       <div class="shift-head"><span class="shift-num">${h}º</span><h2 class="shift-name">${SHIFT_NAMES[h - 1]}</h2></div>
       <ul class="shift-list">`;
     for (let p = 1; p <= 3; p++) {
-      const k = `h${h}p${p}`;
-      html += slotHtml(k, slots ? slots[k] : null, ctx);
+      const seats = seatsOf(id, h, p).map((k) => seatHtml(k, slots ? slots[k] : null, c)).join('');
+      html += `<li class="post${double ? ' double' : ''}">
+        <span class="slot-post" aria-hidden="true">P${p}${double ? '<small>DUPLO</small>' : ''}</span>
+        <ul class="seats" aria-label="P${p}${double ? ', posto duplo' : ''}">${seats}</ul>
+      </li>`;
     }
     html += '</ul></section>';
   }
@@ -270,7 +285,7 @@ function setStatus(el, st) {
 }
 
 function currentStatus() {
-  return scaleStatus(S.scaleId, now(), filledCount(S.slots));
+  return scaleStatus(S.scaleId, now(), filledCount(S.slots), capacityOf(S.scaleId));
 }
 
 function renderTopLines() {
@@ -297,16 +312,16 @@ function renderNotice(st, mine) {
     return;
   }
   if (mine) {
-    const { h, p } = keyInfo(mine);
+    const { h, p, seat } = keyInfo(mine);
     box.className = 'notice n-mine';
     box.innerHTML = `${ICONS.shield}<div class="notice-body"><strong>Você já está escalado nesta escala.</strong>
-      <p>${h}º HORÁRIO — P${p}</p></div>
+      <p>${h}º HORÁRIO — P${p}${isDouble(S.scaleId) ? ` · VAGA ${seat}` : ''}</p></div>
       <button type="button" class="btn btn-ghost" data-act="release" data-key="${mine}">CANCELAR / TROCAR MINHA VAGA</button>`;
     return;
   }
   if (st === STATUS.FULL) {
     box.className = 'notice n-info';
-    box.innerHTML = `${ICONS.info}<div class="notice-body"><strong>Escala preenchida.</strong><p>Todas as 9 vagas foram ocupadas. Consulta liberada.</p></div>`;
+    box.innerHTML = `${ICONS.info}<div class="notice-body"><strong>Escala preenchida.</strong><p>Todas as ${capacityOf(S.scaleId)} vagas foram ocupadas. Consulta liberada.</p></div>`;
     return;
   }
   box.className = 'notice hidden';
@@ -325,11 +340,12 @@ function renderHome() {
   $('scaleDay').textContent = weekdayName(S.scaleId);
   $('scaleDate').textContent = formatBR(S.scaleId);
   setStatus($('scaleStatus'), st);
-  $('scaleCount').textContent = `${filled} de 9 vagas preenchidas`;
-  $('scaleBar').style.width = `${(filled / 9) * 100}%`;
+  const cap = capacityOf(S.scaleId);
+  $('scaleCount').textContent = `${filled} de ${cap} vagas preenchidas`;
+  $('scaleBar').style.width = `${(filled / cap) * 100}%`;
   $('btnToday').href = `#historico/${todayId(now())}`;
   renderNotice(st, mine);
-  renderSlots($('slotsHome'), S.slots, { live: true, status: st, hasMine: !!mine });
+  renderSlots($('slotsHome'), S.slots, { live: true, status: st, hasMine: !!mine }, S.scaleId);
 }
 
 function startScale() {
@@ -386,10 +402,10 @@ async function onTake(key, btn) {
   if (mySlotKey(S.slots)) return toast(MSG.already, 'warn');
   if (S.slots && S.slots[key]) return toast(MSG.taken, 'err');
   if (!navigator.onLine) return toast(MSG.offline, 'err');
-  const { h, p } = keyInfo(key);
+  const { h, p, seat } = keyInfo(key);
   const ok = await confirmModal({
     title: `Você deseja assumir o ${h}º horário, P${p}?`,
-    text: `Escala de ${weekdayName(S.scaleId)}, ${formatBR(S.scaleId)}. Registro: ${S.profile.nome} | ${S.profile.om}.`
+    text: `${isDouble(S.scaleId) ? `Posto duplo — vaga ${seat} de 2. ` : ''}Escala de ${weekdayName(S.scaleId)}, ${formatBR(S.scaleId)}. Registro: ${S.profile.nome} | ${S.profile.om}.`
   });
   if (!ok) return;
   S.busy = true;
@@ -413,9 +429,8 @@ async function onRelease(key) {
   const st = currentStatus();
   if (st === STATUS.WAITING || st === STATUS.CLOSED) return toast(MSG.closed, 'warn');
   if (!navigator.onLine) return toast(MSG.offline, 'err');
-  const { h, p } = keyInfo(key);
   const ok = await confirmModal({
-    title: `Cancelar sua vaga no ${h}º horário, P${p}?`,
+    title: `Cancelar sua vaga no ${seatLabel(S.scaleId, key)}?`,
     text: 'A vaga ficará disponível imediatamente para outro militar. Depois você poderá escolher outra vaga livre.',
     ok: 'CANCELAR VAGA',
     danger: true
@@ -437,11 +452,10 @@ async function onAdminRemove(scaleId, key, slots) {
   if (!S.isAdmin) return;
   const slot = slots && slots[key];
   if (!slot) return;
-  const { h, p } = keyInfo(key);
   const ok = await confirmModal({
     eyebrow: 'ADMINISTRAÇÃO',
     title: `Remover ${slot.nome} | ${slot.om}?`,
-    text: `${h}º horário, P${p} — escala de ${formatBR(scaleId)}. A vaga ficará disponível.`,
+    text: `${seatLabel(scaleId, key)} — escala de ${formatBR(scaleId)}. A vaga ficará disponível.`,
     ok: 'REMOVER',
     danger: true
   });
@@ -471,8 +485,10 @@ async function openHistory() {
     try {
       S.history = await listHistory(S.scaleId);
     } catch (e) {
-      list.innerHTML = '<li class="empty">Não foi possível carregar o histórico.</li>';
-      fail(e);
+      console.error('Erro ao carregar histórico:', e);
+      list.innerHTML = `<li class="empty">Não foi possível carregar o histórico.${e && e.code ? ` (${esc(e.code)})` : ''}
+        <button type="button" class="btn btn-ghost btn-block" id="btnHistRetry" style="margin-top:12px">TENTAR NOVAMENTE</button></li>`;
+      $('btnHistRetry').addEventListener('click', openHistory);
       return;
     }
   }
@@ -482,12 +498,13 @@ async function openHistory() {
   }
   list.innerHTML = S.history.map(({ id, slots }) => {
     const n = filledCount(slots);
+    const cap = capacityOf(id);
     return `<li><a class="hist-item" href="#historico/${id}">
       <span>
         <span class="hist-fill">${formatBR(addDays(id, -1))}</span>
         <span class="hist-scale">Escala de <span>${formatBR(id)}</span> · ${weekdayName(id)}</span>
       </span>
-      <span class="hist-count">${n}/9 ${ICONS.chevron}</span>
+      <span class="hist-count">${n}/${cap} ${ICONS.chevron}</span>
     </a></li>`;
   }).join('');
 }
@@ -510,9 +527,10 @@ async function openDetail(id, force = false) {
   if (S.detailId !== id) return;
   S.detailSlots = slots;
   const n = filledCount(slots);
-  setStatus($('detStatus'), scaleStatus(id, now(), n));
-  $('detCount').textContent = `${n} de 9 vagas preenchidas`;
-  renderSlots($('slotsDetail'), slots, { live: false });
+  const cap = capacityOf(id);
+  setStatus($('detStatus'), scaleStatus(id, now(), n, cap));
+  $('detCount').textContent = `${n} de ${cap} vagas preenchidas`;
+  renderSlots($('slotsDetail'), slots, { live: false }, id);
   if (!slots) $('slotsDetail').insertAdjacentHTML('afterbegin', '<p class="empty">Nenhum militar registrado nesta escala.</p>');
 }
 
@@ -539,7 +557,7 @@ function renderUsers() {
         ${u.bloqueado ? '<span class="user-flag">BLOQUEADO</span>' : ''}
         <span class="user-meta">Cadastro: ${created} · Último acesso: ${seen}</span>
       </div>
-      ${me ? '<span class="tag">ADM</span>' : `<button type="button" class="btn ${u.bloqueado ? 'btn-ghost' : 'btn-danger'} btn-sm" data-act="block" data-uid="${u.uid}">${u.bloqueado ? 'DESBLOQUEAR' : 'BLOQUEAR'}</button>`}
+      ${me || u.nome === ADMIN_NAME ? '<span class="tag">ADM</span>' : `<button type="button" class="btn ${u.bloqueado ? 'btn-ghost' : 'btn-danger'} btn-sm" data-act="block" data-uid="${u.uid}">${u.bloqueado ? 'DESBLOQUEAR' : 'BLOQUEAR'}</button>`}
     </li>`;
   }).join('');
 }
@@ -628,12 +646,22 @@ async function onRegister(e) {
   btn.disabled = true;
   btn.textContent = 'CADASTRANDO...';
   try {
-    await registerUser(S.uid, nome, omInput.value);
+    await registerUser(S.uid, nome, omInput.value, $('regSenha').value.trim());
     toast(MSG.registered, 'ok');
+    showNovidades(true);
     await enter({ nome, om: omInput.value, bloqueado: false });
   } catch (ex) {
-    const [t] = errorMessage(ex);
-    showErr(ex && ex.code === 'permission-denied' ? 'Cadastro recusado. Verifique o nome de guerra e tente novamente.' : t);
+    const code = ex && ex.code;
+    if (code === 'needpass') {
+      $('regSenhaWrap').classList.remove('hidden');
+      $('regSenha').focus();
+      showErr('Este nome é do administrador. Digite a senha do ADM para entrar neste aparelho.');
+    } else if (code === 'badpass') {
+      showErr('Senha incorreta.');
+    } else {
+      const [t] = errorMessage(ex);
+      showErr(code === 'permission-denied' ? 'Cadastro recusado. Verifique o nome de guerra e tente novamente.' : t);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'ENTRAR NO SISTEMA';
@@ -642,9 +670,9 @@ async function onRegister(e) {
 
 async function enter(profile) {
   S.profile = profile;
-  getAdminUid().then((adm) => {
+  checkAdmin(S.uid).then((adm) => {
     const was = S.isAdmin;
-    S.isAdmin = !!adm && adm === S.uid;
+    S.isAdmin = adm;
     if (S.isAdmin && !was && profile.nome === ADMIN_NAME) toast('Acesso de administrador ativo.', 'ok');
     route();
   });
@@ -706,6 +734,10 @@ function bindEvents() {
     if (b) onBlock(b.dataset.uid);
   });
   $('admSearch').addEventListener('input', renderUsers);
+  $('updBtn').addEventListener('click', applyUpdate);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkUpdate();
+  });
   const net = () => $('netbar').classList.toggle('hidden', navigator.onLine);
   window.addEventListener('online', () => {
     net();
@@ -714,6 +746,38 @@ function bindEvents() {
   window.addEventListener('offline', net);
   net();
   $('btnWhats').href = WHATSAPP_GROUP;
+}
+
+const storage = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* sem armazenamento */ } }
+};
+const SEEN_KEY = 'escala-sdev-versao-vista';
+
+async function showNovidades(isNewUser) {
+  if (storage.get(SEEN_KEY) === APP_VERSION) return;
+  storage.set(SEEN_KEY, APP_VERSION);
+  if (isNewUser) return;
+  await confirmModal({ eyebrow: `VERSÃO ${APP_VERSION}`, title: NOVIDADES.titulo, text: NOVIDADES.texto, ok: NOVIDADES.botao, single: true });
+}
+
+async function checkUpdate() {
+  try {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const { version } = await res.json();
+    if (version && version !== APP_VERSION) $('updbar').classList.remove('hidden');
+  } catch { /* offline */ }
+}
+
+async function applyUpdate() {
+  $('updBtn').disabled = true;
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update();
+    if ('caches' in window) await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+  } catch { /* segue */ }
+  location.reload();
 }
 
 function registerSW() {
@@ -725,6 +789,7 @@ function registerSW() {
 async function boot() {
   bindEvents();
   registerSW();
+  checkUpdate();
   show('loading');
   try {
     const user = await withTimeout(ensureAuth(), 20000);
@@ -735,6 +800,7 @@ async function boot() {
       return;
     }
     await enter(profile);
+    showNovidades(false);
   } catch (e) {
     console.error('Erro na inicialização do sistema:', e);
     const code = e && e.code;

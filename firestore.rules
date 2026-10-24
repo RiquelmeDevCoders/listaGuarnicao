@@ -5,7 +5,11 @@ rules_version = '2';
 // Modelo:
 //   users/{uid}        perfil do militar (nome de guerra, OM, bloqueio)
 //   escalas/{AAAA-MM-DD} uma escala por dia, com as 9 vagas em um único documento
-//   config/admin       uid do administrador (SD EV RIQUELME)
+//   config/admin       uid do aparelho principal do administrador (SD EV RIQUELME)
+//   admins/{uid}       outros aparelhos do ADM, liberados com a senha padrão do ADM
+//
+// Posto duplo: cada posto tem 2 vagas (h1p1 e h1p1b ... h3p3 e h3p3b = 18).
+// Escalas antigas, criadas antes do posto duplo, têm só as 9 primeiras chaves.
 //
 // Horário: toda validação de abertura/fechamento usa request.time (relógio do
 // servidor Google), nunca o relógio do celular. Brasília = UTC-3 (sem horário
@@ -42,10 +46,19 @@ service cloud.firestore {
       return hasProfile() && me().bloqueado == false;
     }
 
+    function adminDevicePath(uid) {
+      return /databases/$(database)/documents/admins/$(uid);
+    }
+
+    // SHA-256 de 'escala-sd-ev|' + senha do ADM
+    function adminPassHash() {
+      return '9f69607f94f99bff3bcf2446f0564b25d082dbcbdd5998d64cdc38a869cf763b';
+    }
+
     function isAdmin() {
       return signedIn()
-        && exists(adminPath())
-        && get(adminPath()).data.uid == request.auth.uid;
+        && (exists(adminDevicePath(request.auth.uid))
+            || (exists(adminPath()) && get(adminPath()).data.uid == request.auth.uid));
     }
 
     function validNome(n) {
@@ -61,6 +74,15 @@ service cloud.firestore {
 
     function slotKeys() {
       return ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
+    }
+
+    function doubleKeys() {
+      return ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3',
+              'h1p1b', 'h1p2b', 'h1p3b', 'h2p1b', 'h2p2b', 'h2p3b', 'h3p1b', 'h3p2b', 'h3p3b'];
+    }
+
+    function sv(s, k) {
+      return s.get(k, null);
     }
 
     function validDia(dia) {
@@ -101,9 +123,12 @@ service cloud.firestore {
     }
 
     function noneMine(s) {
-      return notMine(s.h1p1) && notMine(s.h1p2) && notMine(s.h1p3)
-        && notMine(s.h2p1) && notMine(s.h2p2) && notMine(s.h2p3)
-        && notMine(s.h3p1) && notMine(s.h3p2) && notMine(s.h3p3);
+      return notMine(sv(s, 'h1p1')) && notMine(sv(s, 'h1p2')) && notMine(sv(s, 'h1p3'))
+        && notMine(sv(s, 'h2p1')) && notMine(sv(s, 'h2p2')) && notMine(sv(s, 'h2p3'))
+        && notMine(sv(s, 'h3p1')) && notMine(sv(s, 'h3p2')) && notMine(sv(s, 'h3p3'))
+        && notMine(sv(s, 'h1p1b')) && notMine(sv(s, 'h1p2b')) && notMine(sv(s, 'h1p3b'))
+        && notMine(sv(s, 'h2p1b')) && notMine(sv(s, 'h2p2b')) && notMine(sv(s, 'h2p3b'))
+        && notMine(sv(s, 'h3p1b')) && notMine(sv(s, 'h3p2b')) && notMine(sv(s, 'h3p3b'));
     }
 
     function occ(s) {
@@ -111,15 +136,18 @@ service cloud.firestore {
     }
 
     function countFilled(s) {
-      return occ(s.h1p1) + occ(s.h1p2) + occ(s.h1p3)
-        + occ(s.h2p1) + occ(s.h2p2) + occ(s.h2p3)
-        + occ(s.h3p1) + occ(s.h3p2) + occ(s.h3p3);
+      return occ(sv(s, 'h1p1')) + occ(sv(s, 'h1p2')) + occ(sv(s, 'h1p3'))
+        + occ(sv(s, 'h2p1')) + occ(sv(s, 'h2p2')) + occ(sv(s, 'h2p3'))
+        + occ(sv(s, 'h3p1')) + occ(sv(s, 'h3p2')) + occ(sv(s, 'h3p3'))
+        + occ(sv(s, 'h1p1b')) + occ(sv(s, 'h1p2b')) + occ(sv(s, 'h1p3b'))
+        + occ(sv(s, 'h2p1b')) + occ(sv(s, 'h2p2b')) + occ(sv(s, 'h2p3b'))
+        + occ(sv(s, 'h3p1b')) + occ(sv(s, 'h3p2b')) + occ(sv(s, 'h3p3b'));
     }
 
-    function validSlotsShape(s) {
+    function validSlotsShape(dia, s) {
       return s is map
         && s.keys().hasAll(slotKeys())
-        && s.keys().hasOnly(slotKeys());
+        && s.keys().hasOnly(doubleKeys());
     }
 
     // Vaga que o próprio militar está assumindo agora
@@ -144,47 +172,56 @@ service cloud.firestore {
         && d.keys().hasOnly(['data', 'createdAt', 'slots'])
         && d.data == dia
         && d.createdAt == request.time
-        && validSlotsShape(s)
+        && validSlotsShape(dia, s)
         && countFilled(s) <= 1
-        && newSlotOk(s.h1p1) && newSlotOk(s.h1p2) && newSlotOk(s.h1p3)
-        && newSlotOk(s.h2p1) && newSlotOk(s.h2p2) && newSlotOk(s.h2p3)
-        && newSlotOk(s.h3p1) && newSlotOk(s.h3p2) && newSlotOk(s.h3p3);
+        && newSlotOk(sv(s, 'h1p1')) && newSlotOk(sv(s, 'h1p2')) && newSlotOk(sv(s, 'h1p3'))
+        && newSlotOk(sv(s, 'h2p1')) && newSlotOk(sv(s, 'h2p2')) && newSlotOk(sv(s, 'h2p3'))
+        && newSlotOk(sv(s, 'h3p1')) && newSlotOk(sv(s, 'h3p2')) && newSlotOk(sv(s, 'h3p3'))
+        && newSlotOk(sv(s, 'h1p1b')) && newSlotOk(sv(s, 'h1p2b')) && newSlotOk(sv(s, 'h1p3b'))
+        && newSlotOk(sv(s, 'h2p1b')) && newSlotOk(sv(s, 'h2p2b')) && newSlotOk(sv(s, 'h2p3b'))
+        && newSlotOk(sv(s, 'h3p1b')) && newSlotOk(sv(s, 'h3p2b')) && newSlotOk(sv(s, 'h3p3b'));
     }
 
     // Transição permitida para uma vaga, feita por militar comum:
     //   sem mudança | livre -> minha (se eu não tiver outra) | minha -> livre
     function slotTransitionOk(k) {
-      let a = resource.data.slots[k];
-      let b = request.resource.data.slots[k];
+      let a = sv(resource.data.slots, k);
+      let b = sv(request.resource.data.slots, k);
       return a == b
         || (a == null && validTake(b) && noneMine(resource.data.slots))
         || (a != null && a.uid == request.auth.uid && b == null);
     }
 
-    function validUserUpdate() {
+    function validUserUpdate(dia) {
       let s = request.resource.data.slots;
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slots'])
-        && validSlotsShape(s)
+        && validSlotsShape(dia, s)
         && s.diff(resource.data.slots).affectedKeys().size() == 1
         && slotTransitionOk('h1p1') && slotTransitionOk('h1p2') && slotTransitionOk('h1p3')
         && slotTransitionOk('h2p1') && slotTransitionOk('h2p2') && slotTransitionOk('h2p3')
-        && slotTransitionOk('h3p1') && slotTransitionOk('h3p2') && slotTransitionOk('h3p3');
+        && slotTransitionOk('h3p1') && slotTransitionOk('h3p2') && slotTransitionOk('h3p3')
+        && slotTransitionOk('h1p1b') && slotTransitionOk('h1p2b') && slotTransitionOk('h1p3b')
+        && slotTransitionOk('h2p1b') && slotTransitionOk('h2p2b') && slotTransitionOk('h2p3b')
+        && slotTransitionOk('h3p1b') && slotTransitionOk('h3p2b') && slotTransitionOk('h3p3b');
     }
 
     // Administrador: pode apenas liberar (remover) vagas, em qualquer escala
     function adminSlotOk(k) {
-      let a = resource.data.slots[k];
-      let b = request.resource.data.slots[k];
+      let a = sv(resource.data.slots, k);
+      let b = sv(request.resource.data.slots, k);
       return a == b || b == null;
     }
 
-    function validAdminUpdate() {
+    function validAdminUpdate(dia) {
       let s = request.resource.data.slots;
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slots'])
-        && validSlotsShape(s)
+        && validSlotsShape(dia, s)
         && adminSlotOk('h1p1') && adminSlotOk('h1p2') && adminSlotOk('h1p3')
         && adminSlotOk('h2p1') && adminSlotOk('h2p2') && adminSlotOk('h2p3')
-        && adminSlotOk('h3p1') && adminSlotOk('h3p2') && adminSlotOk('h3p3');
+        && adminSlotOk('h3p1') && adminSlotOk('h3p2') && adminSlotOk('h3p3')
+        && adminSlotOk('h1p1b') && adminSlotOk('h1p2b') && adminSlotOk('h1p3b')
+        && adminSlotOk('h2p1b') && adminSlotOk('h2p2b') && adminSlotOk('h2p3b')
+        && adminSlotOk('h3p1b') && adminSlotOk('h3p2b') && adminSlotOk('h3p3b');
     }
 
     function validNewUser(uid) {
@@ -197,6 +234,7 @@ service cloud.firestore {
         && d.lastSeen == request.time
         && d.bloqueado == false
         && (d.nome != 'RIQUELME'
+            || existsAfter(adminDevicePath(uid))
             || getAfter(adminPath()).data.uid == uid);
     }
 
@@ -234,11 +272,24 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Novo aparelho do ADM: precisa da senha do ADM e do cadastro RIQUELME no mesmo envio.
+    match /admins/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll(['prova', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['prova', 'createdAt'])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.prova == adminPassHash()
+        && getAfter(userPath(uid)).data.nome == 'RIQUELME';
+      allow update, delete: if false;
+    }
+
     match /escalas/{dia} {
       allow read: if hasProfile();
       allow create: if activeUser() && janelaAberta(dia) && validCreate(dia);
-      allow update: if (activeUser() && janelaAberta(dia) && validUserUpdate())
-        || (isAdmin() && validAdminUpdate());
+      allow update: if (activeUser() && janelaAberta(dia) && validUserUpdate(dia))
+        || (isAdmin() && validAdminUpdate(dia));
       allow delete: if false;
     }
 
