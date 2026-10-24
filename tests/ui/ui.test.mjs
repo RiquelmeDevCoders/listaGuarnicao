@@ -2,10 +2,12 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { readFile, mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
 const ROOT = path.resolve('.');
+const APP_VERSION = JSON.parse(readFileSync('version.json', 'utf8')).version;
 const SHOTS = path.resolve('tests/screens');
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const brt = (y, m, d, h, min = 0) => Date.UTC(y, m - 1, d, h + 3, min);
@@ -39,13 +41,14 @@ async function open(mock, { width = 390, height = 844, at } = {}) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => { if (m.type() === 'error') console.log('BROWSER:', m.text()); });
   page.on('dialog', (d) => { errors.push('native dialog: ' + d.message()); d.dismiss(); });
   await page.addInitScript((m) => {
     m.offset = m.at ? m.at - Date.now() : 0;
     window.__MOCK = m;
     window.__shared = [];
-    if (!m.showNovidades && !sessionStorage.getItem('keep')) localStorage.setItem('escala-sdev-versao-vista', '2.0.0');
-  }, { ...mock, at });
+    if (!m.showNovidades && !sessionStorage.getItem('keep')) localStorage.setItem('escala-sdev-versao-vista', m.appVersion);
+  }, { ...mock, at, appVersion: APP_VERSION });
   await page.goto(base);
   page.errors = errors;
   return page;
@@ -191,7 +194,7 @@ test('13 compartilhar escala e sistema / 14 WhatsApp', async () => {
   await page.click('#btnShareScale');
   await page.click('#btnShareApp');
   const shared = await page.evaluate(() => window.__shared);
-  assert.match(shared[0].text, /^\*LISTA DA GUARNIÇÃO\*\nEscala de SEGUNDA-FEIRA — 05\/10\/2026\n\n\*1º HORÁRIO\*\nP1 - \nP2 - RIQUELME \| CIA C\nP3 - \n\n\*2º HORÁRIO\*/);
+  assert.match(shared[0].text, /^\*LISTA DA GUARNIÇÃO\*\nEscala de SEGUNDA-FEIRA — 05\/10\/2026\n\*Vagas preenchidas: 1 de 9\* — faltam 8\n\n\*1º HORÁRIO\* \(1\/3\)\nP1 - \nP2 - RIQUELME \| CIA C\nP3 - \n\n\*2º HORÁRIO\* \(0\/3\)/);
   assert.match(shared[1].text, /^Confira e preencha a escala da guarnição pelo sistema:\n\nhttp/);
   await page.evaluate(() => { delete Navigator.prototype.share; navigator.share = undefined; });
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -288,8 +291,9 @@ test('posto duplo a partir de 25/10/2026: 2 militares por posto, 18 vagas', asyn
   await page.evaluate(() => { navigator.share = async (d) => { window.__shared.push(d); }; });
   await page.click('#btnShareScale');
   const t = (await page.evaluate(() => window.__shared))[0].text;
-  assert.match(t, /\*2º HORÁRIO\*\nP1 - \nP1 - \nP2 - JOÃO \| CIA C\nP2 - SILVA \| CIA C\nP3 - \nP3 - /);
-  assert.match(t, /Vagas preenchidas: 2\/18/);
+  assert.match(t, /\*Vagas preenchidas: 2 de 18\* — faltam 16/);
+  assert.match(t, /\*2º HORÁRIO\* \(2\/6\)\nP1 - \nP1 - \nP2 - JOÃO \| CIA C\nP2 - SILVA \| CIA C\nP3 - \nP3 - /);
+  assert.match(t, /\*1º HORÁRIO\* \(0\/6\)/);
   await page.context().close();
 
   const small = await open({ ...me('MAGALHÃES BARBOSA'), escalas: { '2026-10-25': { h1p1: { uid: 'z', nome: 'FERNANDES ALBUQUERQUE', om: 'CIA C' } } } }, { width: 320, height: 568, at: brt(2026, 10, 24, 19) });
@@ -355,5 +359,38 @@ test('histórico mostra escalas simples e duplas', async () => {
   await page.click('a[href="#historico/2026-10-25"]');
   await page.waitForSelector('#view-detail:not(.hidden) .post.double');
   assert.match(await page.textContent('#slotsDetail'), /ALVES[\s\S]*BRITO/);
+  await page.context().close();
+});
+
+test('ADM exclui militar, vê erros e aviso de regras', async () => {
+  const page = await open({
+    uid: 'me', admin: 'me', rulesOk: false,
+    users: { me: { nome: 'RIQUELME', om: 'CIA C', bloqueado: false }, x: { nome: 'RIQUELM', om: 'PE', bloqueado: true } },
+    escalas: { '2026-10-25': { h1p1: { uid: 'x', nome: 'RIQUELM', om: 'PE' } } },
+    errors: [{ id: '1', nome: 'SILVA', acao: 'reservar', codigo: 'permission-denied', escala: '2026-10-25', versao: '2.0.0' }]
+  }, { at: brt(2026, 10, 24, 19) });
+  await page.waitForSelector('#navAdmin:not(.hidden)');
+  await page.click('#navAdmin');
+  await page.waitForSelector('.user');
+  assert.equal(await page.locator('#rulesWarn:not(.hidden)').count(), 1);
+  assert.match(await page.textContent('#errList'), /SILVA[\s\S]*reservar[\s\S]*permission-denied/);
+  await shot(page, '15-admin');
+  await page.click('[data-act="delete"][data-uid="x"]');
+  assert.match(await page.textContent('#modalTitle'), /Excluir RIQUELM \| PE/);
+  await page.click('#modalOk');
+  await page.waitForFunction(() => !document.querySelector('#userList').textContent.includes('RIQUELM |') && !document.querySelector('#userList').textContent.includes('RIQUELMPE'));
+  assert.equal(await page.locator('[data-uid="x"]').count(), 0);
+  assert.equal(await page.evaluate(() => window.__mock.store.escalas['2026-10-25'].h1p1), null);
+  await page.click('#errClear');
+  await page.click('#modalOk');
+  await page.waitForFunction(() => document.querySelector('#errList').textContent.includes('Nenhum erro'));
+  await page.context().close();
+});
+
+test('militar excluído volta para o cadastro', async () => {
+  const page = await open(me(), { at: brt(2026, 10, 24, 19) });
+  await page.waitForSelector('#slotsHome .slot');
+  await page.evaluate(() => { delete window.__mock.store.users.me; window.__mock.profileCb(null, false); });
+  await page.waitForSelector('#view-register:not(.hidden)');
   await page.context().close();
 });

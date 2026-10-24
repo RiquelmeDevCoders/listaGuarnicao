@@ -1,15 +1,16 @@
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.1.0';
 
 export const NOVIDADES = {
   titulo: 'Nova versão no ar!',
   texto: [
-    'Fala, guerreiro! Aqui é o SD EV RIQUELME.',
-    'Atualizei o sistema pra deixar a escala mais organizada:',
+    'Fala, guerreiro! SD EV RIQUELME na área de novo.',
+    'Dei uma geral no sistema pra ficar tudo nos conformes:',
     '',
-    '• Agora todo posto é DUPLO: 2 vagas por posto, 18 por escala.',
-    '• Histórico corrigido: dá pra consultar todas as escalas anteriores.',
+    '• Posto DUPLO firme: 2 vagas por posto, 18 por escala.',
+    '• A lista pro grupo agora mostra quantas das 18 vagas estão preenchidas.',
+    '• Corrigi os erros de "operação não permitida".',
     '',
-    'Espero que agora a gente possa parar de rodar na 24 KKKKKKKKKKK'
+    'Bora preencher certinho e parar de rodar na 24 KKKKKKKKKKK'
   ].join('\n'),
   botao: 'BORA, ENTENDIDO!'
 };

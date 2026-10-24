@@ -1,13 +1,14 @@
-const CACHE = 'escala-sdev-v3';
+const CACHE = 'escala-sdev-2.1.0';
+const V = '2.1.0';
 const SHELL = [
   './',
   'index.html',
-  'css/style.css',
-  'js/app.js',
-  'js/firebase.js',
-  'js/time.js',
-  'js/escala.js',
-  'js/versao.js',
+  `css/style.css?v=${V}`,
+  `js/app.js?v=${V}`,
+  `js/firebase.js?v=${V}`,
+  `js/time.js?v=${V}`,
+  `js/escala.js?v=${V}`,
+  `js/versao.js?v=${V}`,
   'manifest.json',
   'icons/icon.svg',
   'icons/icon-192.png',

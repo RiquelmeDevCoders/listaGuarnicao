@@ -1,14 +1,15 @@
 import {
   ADMIN_NAME, AppError, ensureAuth, getProfile, watchProfile, checkAdmin,
   registerUser, syncServerClock, watchScale, reserveSlot, releaseSlot, adminRemoveSlot,
-  getScale, listHistory, listUsers, setUserBlocked
-} from './firebase.js';
-import { isDouble, seatsOf, capacityOf, keyInfo } from './escala.js';
-import { APP_VERSION, NOVIDADES } from './versao.js';
+  getScale, listHistory, listUsers, setUserBlocked, deleteUser, logError, listErrors,
+  clearErrors, rulesUpToDate
+} from './firebase.js?v=2.1.0';
+import { isDouble, seatsOf, capacityOf, keyInfo } from './escala.js?v=2.1.0';
+import { APP_VERSION, NOVIDADES } from './versao.js?v=2.1.0';
 import {
   STATUS, todayId, nextScaleId, addDays, weekdayName, openingMs, scaleStatus,
   formatBR, formatClock, formatDateTime, formatCountdown, greeting, openingHour
-} from './time.js';
+} from './time.js?v=2.1.0';
 
 const WHATSAPP_GROUP = 'https://chat.whatsapp.com/CT5EigeEZAr36FZMgSYE2r?s=cl&p=i&mlu=4&ilr=4';
 const SHIFT_NAMES = ['PRIMEIRO HORÁRIO', 'SEGUNDO HORÁRIO', 'TERCEIRO HORÁRIO'];
@@ -143,14 +144,34 @@ function errorMessage(e) {
       if (st === STATUS.WAITING) return [MSG.notOpen, 'warn'];
       if (st === STATUS.CLOSED) return [MSG.closed, 'warn'];
     }
-    return ['Operação não permitida. Atualize a página e tente novamente.', 'err'];
+    return ['Não foi possível confirmar agora. Toque em ATUALIZAR no topo ou recarregue a página e tente de novo.', 'err'];
   }
   return [MSG.generic, 'err'];
 }
 
-function fail(e) {
+function fail(e, acao = '') {
   const [text, type] = errorMessage(e);
   toast(text, type, 5000);
+  const code = e && e.code;
+  if (acao && !['taken', 'already', 'notmine', 'needpass', 'badpass'].includes(code)) {
+    console.error(`Falha em ${acao}:`, e);
+    logError(S.uid, S.profile ? S.profile.nome : '', acao, e, S.scaleId || '');
+  }
+}
+
+async function diagnoseDenied(e, acao) {
+  try {
+    const fresh = await getProfile(S.uid);
+    if (!fresh) {
+      toast('Seu cadastro não foi encontrado. Faça o cadastro novamente.', 'err', 6000);
+      S.profile = null;
+      show('register');
+      return;
+    }
+    S.profile = { ...S.profile, ...fresh };
+    await syncClock();
+  } catch { /* segue com a mensagem padrão */ }
+  fail(e, acao);
 }
 
 async function share(text, title, fallback) {
@@ -185,9 +206,17 @@ async function copyText(text) {
 }
 
 function scaleText(id, slots) {
-  const lines = ['*LISTA DA GUARNIÇÃO*', `Escala de ${weekdayName(id)} — ${formatBR(id)}`];
+  const cap = capacityOf(id);
+  const n = filledCount(slots);
+  const lines = [
+    '*LISTA DA GUARNIÇÃO*',
+    `Escala de ${weekdayName(id)} — ${formatBR(id)}`,
+    `*Vagas preenchidas: ${n} de ${cap}*${n >= cap ? ' — ESCALA COMPLETA' : ` — faltam ${cap - n}`}`
+  ];
   for (let h = 1; h <= 3; h++) {
-    lines.push('', `*${h}º HORÁRIO*`);
+    const hk = Object.keys(slots || {}).filter((k) => k[1] === String(h));
+    const hn = hk.filter((k) => slots[k]).length;
+    lines.push('', `*${h}º HORÁRIO* (${hn}/${cap / 3})`);
     for (let p = 1; p <= 3; p++) {
       for (const k of seatsOf(id, h, p)) {
         const s = slots && slots[k];
@@ -195,7 +224,7 @@ function scaleText(id, slots) {
       }
     }
   }
-  lines.push('', `Vagas preenchidas: ${filledCount(slots)}/${capacityOf(id)}`, `Sistema: ${appUrl()}`);
+  lines.push('', `Preencha pelo sistema: ${appUrl()}`);
   return lines.join('\n');
 }
 
@@ -417,7 +446,8 @@ async function onTake(key, btn) {
     await withTimeout(reserveSlot(S.scaleId, key, S.uid, S.profile), 20000);
     toast(MSG.reserved, 'ok');
   } catch (e) {
-    fail(e);
+    if (e && e.code === 'permission-denied') await diagnoseDenied(e, 'reservar');
+    else fail(e, 'reservar');
   } finally {
     S.busy = false;
     renderHome();
@@ -441,7 +471,8 @@ async function onRelease(key) {
     await withTimeout(releaseSlot(S.scaleId, key, S.uid), 20000);
     toast(MSG.changed, 'ok');
   } catch (e) {
-    fail(e);
+    if (e && e.code === 'permission-denied') await diagnoseDenied(e, 'cancelar');
+    else fail(e, 'cancelar');
   } finally {
     S.busy = false;
     renderHome();
@@ -467,7 +498,7 @@ async function onAdminRemove(scaleId, key, slots) {
     S.history = null;
     if (scaleId !== S.scaleId) await openDetail(scaleId, true);
   } catch (e) {
-    fail(e);
+    fail(e, 'adm-remover');
   } finally {
     S.busy = false;
   }
@@ -521,7 +552,7 @@ async function openDetail(id, force = false) {
     try {
       slots = await getScale(id);
     } catch (e) {
-      fail(e);
+      fail(e, 'abrir-escala');
     }
   }
   if (S.detailId !== id) return;
@@ -557,7 +588,10 @@ function renderUsers() {
         ${u.bloqueado ? '<span class="user-flag">BLOQUEADO</span>' : ''}
         <span class="user-meta">Cadastro: ${created} · Último acesso: ${seen}</span>
       </div>
-      ${me || u.nome === ADMIN_NAME ? '<span class="tag">ADM</span>' : `<button type="button" class="btn ${u.bloqueado ? 'btn-ghost' : 'btn-danger'} btn-sm" data-act="block" data-uid="${u.uid}">${u.bloqueado ? 'DESBLOQUEAR' : 'BLOQUEAR'}</button>`}
+      ${me || u.nome === ADMIN_NAME ? '<span class="tag">ADM</span>' : `<div class="user-actions">
+        <button type="button" class="btn ${u.bloqueado ? 'btn-ghost' : 'btn-danger'} btn-sm" data-act="block" data-uid="${u.uid}">${u.bloqueado ? 'DESBLOQUEAR' : 'BLOQUEAR'}</button>
+        <button type="button" class="btn btn-danger btn-sm" data-act="delete" data-uid="${u.uid}">EXCLUIR</button>
+      </div>`}
     </li>`;
   }).join('');
 }
@@ -568,12 +602,72 @@ async function openAdmin() {
     return;
   }
   show('admin');
+  rulesUpToDate().then((ok) => $('rulesWarn').classList.toggle('hidden', ok));
+  loadErrors();
   $('userList').innerHTML = '<li class="loader"><span class="spinner" aria-hidden="true"></span></li>';
   try {
     S.users = await listUsers();
     renderUsers();
   } catch (e) {
     $('userList').innerHTML = '<li class="empty">Não foi possível carregar os militares.</li>';
+    fail(e, 'listar-militares');
+  }
+}
+
+async function onDelete(uid) {
+  const u = (S.users || []).find((x) => x.uid === uid);
+  if (!u) return;
+  const ok = await confirmModal({
+    eyebrow: 'ADMINISTRAÇÃO',
+    title: `Excluir ${u.nome} | ${u.om}?`,
+    text: 'O cadastro será apagado e o militar sai da escala aberta. As escalas antigas continuam no histórico. Se ele entrar de novo, terá que se cadastrar outra vez.',
+    ok: 'EXCLUIR',
+    danger: true
+  });
+  if (!ok) return;
+  try {
+    await withTimeout(deleteUser(uid, [S.scaleId]), 20000);
+    S.users = S.users.filter((x) => x.uid !== uid);
+    renderUsers();
+    toast('Militar excluído.', 'ok');
+  } catch (e) {
+    fail(e, 'excluir-militar');
+  }
+}
+
+function renderErrors(list) {
+  const box = $('errList');
+  $('errClear').classList.toggle('hidden', !list.length);
+  if (!list.length) {
+    box.innerHTML = '<li class="empty">Nenhum erro registrado.</li>';
+    return;
+  }
+  box.innerHTML = list.map((x) => `<li class="err-item">
+    <b>${esc(x.nome || '—')}</b> · ${esc(x.acao)} · <code>${esc(x.codigo)}</code>
+    <span class="user-meta">${x.em ? formatDateTime(x.em.toMillis()) : '—'} · escala ${esc(x.escala ? formatBR(x.escala) : '—')} · v${esc(x.versao)}</span>
+  </li>`).join('');
+}
+
+async function loadErrors() {
+  try {
+    S.errors = await listErrors();
+    renderErrors(S.errors);
+  } catch (e) {
+    console.error('Erro ao carregar erros:', e);
+    $('errList').innerHTML = '<li class="empty">Não foi possível carregar os erros.</li>';
+  }
+}
+
+async function onClearErrors() {
+  if (!S.errors || !S.errors.length) return;
+  const ok = await confirmModal({ eyebrow: 'ADMINISTRAÇÃO', title: 'Limpar registro de erros?', ok: 'LIMPAR', danger: true });
+  if (!ok) return;
+  try {
+    await clearErrors(S.errors.map((x) => x.id));
+    S.errors = [];
+    renderErrors([]);
+    toast(MSG.changed, 'ok');
+  } catch (e) {
     fail(e);
   }
 }
@@ -596,7 +690,7 @@ async function onBlock(uid) {
     renderUsers();
     toast(MSG.changed, 'ok');
   } catch (e) {
-    fail(e);
+    fail(e, 'bloquear');
   }
 }
 
@@ -659,6 +753,7 @@ async function onRegister(e) {
     } else if (code === 'badpass') {
       showErr('Senha incorreta.');
     } else {
+      logError(S.uid, nome, 'cadastro', ex);
       const [t] = errorMessage(ex);
       showErr(code === 'permission-denied' ? 'Cadastro recusado. Verifique o nome de guerra e tente novamente.' : t);
     }
@@ -677,8 +772,17 @@ async function enter(profile) {
     route();
   });
   if (S.unsubProfile) S.unsubProfile();
-  S.unsubProfile = watchProfile(S.uid, (p) => {
-    if (!p) return;
+  S.unsubProfile = watchProfile(S.uid, (p, fromCache) => {
+    if (!p) {
+      if (fromCache) return;
+      S.profile = null;
+      if (S.unsubScale) S.unsubScale();
+      S.unsubScale = null;
+      S.scaleId = null;
+      toast('Seu cadastro foi removido. Faça o cadastro novamente.', 'warn', 6000);
+      show('register');
+      return;
+    }
     const changed = p.bloqueado !== S.profile.bloqueado;
     S.profile = { ...S.profile, nome: p.nome, om: p.om, bloqueado: p.bloqueado };
     if (changed) {
@@ -732,9 +836,12 @@ function bindEvents() {
   $('userList').addEventListener('click', (e) => {
     const b = e.target.closest('[data-act="block"]');
     if (b) onBlock(b.dataset.uid);
+    const d = e.target.closest('[data-act="delete"]');
+    if (d) onDelete(d.dataset.uid);
   });
   $('admSearch').addEventListener('input', renderUsers);
   $('updBtn').addEventListener('click', applyUpdate);
+  $('errClear').addEventListener('click', onClearErrors);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') checkUpdate();
   });

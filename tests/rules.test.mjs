@@ -267,3 +267,25 @@ test('posto duplo: 2 militares no mesmo posto, nunca 3', { skip: !OPEN && 'fora 
   await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), { 'slots.h1p1c': slot('c', 'COSTA') }));
   await assertFails(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h2p2b': slot('a', 'SILVA') }));
 });
+
+test('ADM exclui militar; militar comum não exclui', async () => {
+  await seedAdmin('adm');
+  await seedUser('a', 'SILVA');
+  await seedUser('b', 'SOUZA');
+  await assertFails(deleteDoc(doc(db('b'), 'users', 'a')));
+  await assertFails(deleteDoc(doc(db('adm'), 'users', 'adm')));
+  await assertSucceeds(deleteDoc(doc(db('adm'), 'users', 'a')));
+});
+
+test('registro de erros: militar grava, só ADM lê', async () => {
+  await seedAdmin('adm');
+  await seedUser('a', 'SILVA');
+  const erro = { uid: 'a', nome: 'SILVA', acao: 'reservar', codigo: 'permission-denied', detalhe: 'x', escala: TOMORROW, versao: '2.1.0', em: serverTimestamp() };
+  await assertSucceeds(setDoc(doc(db('a'), 'erros', 'e1'), erro));
+  await assertFails(setDoc(doc(db('a'), 'erros', 'e2'), { ...erro, uid: 'b' }));
+  await assertFails(setDoc(doc(db('a'), 'erros', 'e3'), { ...erro, extra: 1 }));
+  await assertFails(getDocs(collection(db('a'), 'erros')));
+  await assertSucceeds(getDocs(collection(db('adm'), 'erros')));
+  await assertSucceeds(deleteDoc(doc(db('adm'), 'erros', 'e1')));
+  await assertSucceeds(getDoc(doc(db('a'), 'meta', 'regras-2-1')));
+});

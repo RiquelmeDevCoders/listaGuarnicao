@@ -66,3 +66,17 @@ export async function listUsers() {
     .sort((a, b) => a.nome.localeCompare(b.nome));
 }
 export async function setUserBlocked(uid, b) { store.users[uid].bloqueado = b; }
+store.errors = (M.errors || []).map((e) => ({ ...e, em: ts(Date.now()) }));
+export async function deleteUser(uid, scaleIds) {
+  for (const id of scaleIds) {
+    const s = store.escalas[id] || {};
+    for (const k of Object.keys(s)) if (s[k] && s[k].uid === uid) window.__mock.clear(id, k);
+  }
+  delete store.users[uid];
+}
+export async function logError(uid, nome, acao, err, escala = '') {
+  store.errors.unshift({ id: String(store.errors.length + 1), uid, nome, acao, codigo: (err && err.code) || 'desconhecido', escala, versao: '2.1.0', em: ts(Date.now()) });
+}
+export async function listErrors() { return store.errors; }
+export async function clearErrors() { store.errors = []; }
+export async function rulesUpToDate() { return M.rulesOk !== false; }

@@ -258,7 +258,7 @@ service cloud.firestore {
       allow update: if signedIn()
         && ((request.auth.uid == uid && validSelfUpdate())
             || (isAdmin() && validAdminUserUpdate()));
-      allow delete: if false;
+      allow delete: if isAdmin() && request.auth.uid != uid;
     }
 
     match /config/admin {
@@ -283,6 +283,29 @@ service cloud.firestore {
         && request.resource.data.prova == adminPassHash()
         && getAfter(userPath(uid)).data.nome == 'RIQUELME';
       allow update, delete: if false;
+    }
+
+    // Registro de erros dos militares, para o ADM investigar problemas
+    match /erros/{id} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['uid', 'nome', 'acao', 'codigo', 'detalhe', 'escala', 'versao', 'em'])
+        && request.resource.data.keys().hasOnly(['uid', 'nome', 'acao', 'codigo', 'detalhe', 'escala', 'versao', 'em'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.nome is string && request.resource.data.nome.size() <= 20
+        && request.resource.data.acao is string && request.resource.data.acao.size() <= 40
+        && request.resource.data.codigo is string && request.resource.data.codigo.size() <= 60
+        && request.resource.data.detalhe is string && request.resource.data.detalhe.size() <= 300
+        && request.resource.data.escala is string && request.resource.data.escala.size() <= 10
+        && request.resource.data.versao is string && request.resource.data.versao.size() <= 10
+        && request.resource.data.em == request.time;
+      allow read, delete: if isAdmin();
+      allow update: if false;
+    }
+
+    // Marcador de versão das regras: o app confere se estas regras foram publicadas
+    match /meta/regras-2-1 {
+      allow get: if signedIn();
+      allow write: if false;
     }
 
     match /escalas/{dia} {

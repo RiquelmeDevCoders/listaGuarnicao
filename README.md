@@ -77,10 +77,12 @@ As 9 vagas ficam num único documento: uma leitura mostra a escala inteira, o te
 
 Para lançar uma versão nova:
 
-1. Aumente a versão em **`js/versao.js`** (`APP_VERSION`) e em **`version.json`** — os dois iguais.
+1. `node scripts/versao.mjs 2.1.1` — atualiza a versão em todos os arquivos (index, imports, service worker, version.json).
 2. Escreva o recado em `NOVIDADES` (`js/versao.js`).
-3. Aumente o cache em `sw.js` (`escala-sdev-v3` → `v4`).
+3. Se mudou `firestore.rules`, publique no console **antes** do push.
 4. Commit e push na `main`.
+
+Os arquivos são carregados com `?v=VERSÃO`, então nenhum celular mistura arquivo novo com antigo.
 
 Quem estiver com o app aberto vê a faixa **“Nova versão disponível! ATUALIZAR”**; ao entrar na versão nova, cada militar vê o recado uma única vez.
 
@@ -124,6 +126,9 @@ Perdeu todos os aparelhos ADM? No console do Firebase, em `config/admin`, troque
 
 - Lista de militares cadastrados com OM, data de cadastro e último acesso, busca e totais por OM.
 - **BLOQUEAR / DESBLOQUEAR** militar (bloqueado não escolhe nem cancela vagas).
+- **EXCLUIR** militar: apaga o cadastro e tira ele da escala aberta (o histórico fica como estava).
+- **Erros dos militares:** toda falha no celular de alguém (ex.: `permission-denied`) é registrada com nome, ação, escala e versão do app.
+- **Aviso de regras desatualizadas:** se o `firestore.rules` publicado no console for antigo, o painel avisa.
 - **REMOVER** militar de qualquer vaga, na escala atual ou em escalas antigas.
 - Histórico completo.
 
@@ -145,7 +150,7 @@ Todas validadas **no servidor** (Firestore Security Rules). Nada depende só do 
 | Criar vagas inexistentes / campos extras | Documento precisa ter exatamente `data`, `createdAt`, `slots`, e `slots` exatamente as 9 chaves |
 | Mudar a data da escala | `data` precisa ser igual ao ID e não pode ser alterada |
 | Alterar mais de uma vaga por vez | Militar comum altera exatamente 1 vaga por gravação |
-| Excluir dados | `delete` proibido para todos |
+| Excluir dados | Só o ADM exclui cadastros de militares (nunca o próprio) e registros de erro; escalas nunca são excluídas |
 | Mudar nome/OM/bloqueio próprio | Militar só atualiza `lastSeen` do próprio perfil |
 | Ver dados de outros militares | `users` só é lido pelo dono e pelo admin |
 | Virar admin / usar o nome RIQUELME | `config/admin` só é criado uma vez; outro aparelho só vira ADM enviando o hash correto da senha junto com o cadastro RIQUELME |

@@ -16,8 +16,8 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
-  <link rel="modulepreload" href="js/app.js">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="modulepreload" href="js/app.js?v=2.1.0">
+  <link rel="stylesheet" href="css/style.css?v=2.1.0">
 </head>
 <body>
   <a class="skip" href="#main">Pular para o conteúdo</a>
@@ -192,15 +192,25 @@
     </section>
 
     <section id="view-admin" class="view hidden" aria-labelledby="admTitle">
+      <div class="notice n-block hidden" id="rulesWarn" role="alert">
+        <div class="notice-body"><strong>Regras do Firebase desatualizadas</strong>
+          <p>Publique o arquivo firestore.rules no console do Firebase (Firestore → Regras → Publicar). Sem isso os militares recebem "operação não permitida".</p></div>
+      </div>
       <p class="eyebrow">ADMINISTRAÇÃO</p>
       <h1 class="h-title" id="admTitle">Militares cadastrados</h1>
-      <p class="muted">Bloqueie militares e remova vagas pela própria escala (botão REMOVER).</p>
+      <p class="muted">Bloqueie ou exclua militares. Para tirar alguém de uma vaga, use REMOVER na própria escala.</p>
       <div class="adm-stats" id="admStats"></div>
       <label class="field">
         <span>Buscar</span>
         <input id="admSearch" type="search" placeholder="Nome de guerra" autocomplete="off">
       </label>
       <ul class="user-list" id="userList"></ul>
+      <div class="err-head">
+        <h2 class="h-title">Erros dos militares</h2>
+        <button type="button" class="btn btn-ghost btn-sm hidden" id="errClear">LIMPAR</button>
+      </div>
+      <p class="muted">Quando algo falha no celular de um militar, aparece aqui.</p>
+      <ul class="user-list" id="errList"></ul>
     </section>
 
   </main>
@@ -224,6 +234,6 @@
 
   <div class="toasts" id="toasts" aria-live="assertive" aria-atomic="false"></div>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=2.1.0"></script>
 </body>
 </html>

@@ -4,10 +4,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js';
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  doc, getDoc, getDocFromServer, getDocs, updateDoc, onSnapshot, writeBatch,
+  doc, getDoc, getDocFromServer, getDocs, updateDoc, deleteDoc, addDoc, onSnapshot, writeBatch,
   runTransaction, serverTimestamp, collection, query, orderBy, limit
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { keysFor, emptySlots } from './escala.js';
+import { keysFor, emptySlots } from './escala.js?v=2.1.0';
+import { APP_VERSION } from './versao.js?v=2.1.0';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCL8IFluqGulij4CPkzkwxWetuK6wNZK8M",
@@ -86,7 +87,7 @@ export async function getProfile(uid) {
 }
 
 export function watchProfile(uid, cb) {
-  return onSnapshot(userRef(uid), (s) => cb(s.exists() ? s.data() : null), () => {});
+  return onSnapshot(userRef(uid), (s) => cb(s.exists() ? s.data() : null, s.metadata.fromCache), () => {});
 }
 
 export async function checkAdmin(uid) {
@@ -208,4 +209,56 @@ export async function listUsers() {
 
 export async function setUserBlocked(uid, bloqueado) {
   await withTimeout(updateDoc(userRef(uid), { bloqueado }), 15000);
+}
+
+export async function deleteUser(uid, scaleIds) {
+  await runTransaction(db, async (tx) => {
+    const snaps = [];
+    for (const id of scaleIds) snaps.push([id, await tx.get(scaleRef(id))]);
+    for (const [id, snap] of snaps) {
+      if (!snap.exists()) continue;
+      const slots = snap.data().slots || {};
+      const clear = {};
+      for (const k of Object.keys(slots)) if (slots[k] && slots[k].uid === uid) clear[`slots.${k}`] = null;
+      if (Object.keys(clear).length) tx.update(scaleRef(id), clear);
+    }
+    tx.delete(userRef(uid));
+  });
+}
+
+const cut = (v, n) => String(v ?? '').slice(0, n);
+
+export async function logError(uid, nome, acao, err, escala = '') {
+  try {
+    await addDoc(collection(db, 'erros'), {
+      uid,
+      nome: cut(nome, 20),
+      acao: cut(acao, 40),
+      codigo: cut((err && err.code) || 'desconhecido', 60),
+      detalhe: cut(err && err.message, 300),
+      escala: cut(escala, 10),
+      versao: cut(APP_VERSION, 10),
+      em: serverTimestamp()
+    });
+  } catch { /* registro de erro é opcional */ }
+}
+
+export async function listErrors(max = 40) {
+  const snap = await getDocs(query(collection(db, 'erros'), orderBy('em', 'desc'), limit(max)));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+export async function clearErrors(ids) {
+  const batch = writeBatch(db);
+  ids.slice(0, 400).forEach((id) => batch.delete(doc(db, 'erros', id)));
+  await withTimeout(batch.commit(), 15000);
+}
+
+export async function rulesUpToDate() {
+  try {
+    await getDocFromServer(doc(db, 'meta', 'regras-2-1'));
+    return true;
+  } catch (e) {
+    return !(e && e.code === 'permission-denied');
+  }
 }
