@@ -1,16 +1,15 @@
-export const APP_VERSION = '2.1.0';
+export const APP_VERSION = '2.2.0';
 
 export const NOVIDADES = {
   titulo: 'Nova versão no ar!',
   texto: [
-    'Fala, guerreiro! SD EV RIQUELME na área de novo.',
-    'Dei uma geral no sistema pra ficar tudo nos conformes:',
+    'Fala, guerreiro! SD EV RIQUELME aqui de novo.',
+    'Achei e corrigi o erro que impedia de escolher vaga ("Não foi possível confirmar agora").',
     '',
-    '• Posto DUPLO firme: 2 vagas por posto, 18 por escala.',
-    '• A lista pro grupo agora mostra quantas das 18 vagas estão preenchidas.',
-    '• Corrigi os erros de "operação não permitida".',
+    '• Escolher e cancelar vaga voltou a funcionar normal.',
+    '• Posto DUPLO: 2 vagas por posto, 18 por escala.',
     '',
-    'Bora preencher certinho e parar de rodar na 24 KKKKKKKKKKK'
+    'Agora é só escolher e parar de rodar na 24 KKKKKKKKKKK'
   ].join('\n'),
   botao: 'BORA, ENTENDIDO!'
 };

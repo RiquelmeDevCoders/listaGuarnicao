@@ -5,10 +5,10 @@ import {
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   doc, getDoc, getDocFromServer, getDocs, updateDoc, deleteDoc, addDoc, onSnapshot, writeBatch,
-  runTransaction, serverTimestamp, collection, query, orderBy, limit
+  runTransaction, serverTimestamp, deleteField, collection, query, orderBy, limit
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { keysFor, emptySlots } from './escala.js?v=2.1.0';
-import { APP_VERSION } from './versao.js?v=2.1.0';
+import { keysFor, emptySlots } from './escala.js?v=2.2.0';
+import { APP_VERSION } from './versao.js?v=2.2.0';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCL8IFluqGulij4CPkzkwxWetuK6wNZK8M",
@@ -146,8 +146,7 @@ export function watchScale(id, cb, onErr) {
 }
 
 export async function reserveSlot(id, key, uid, profile) {
-  const keys = keysFor(id);
-  if (!keys.includes(key)) throw new AppError('invalid');
+  if (!keysFor(id).includes(key)) throw new AppError('invalid');
   const ref = scaleRef(id);
   const slot = { uid, nome: profile.nome, om: profile.om, em: serverTimestamp() };
   await runTransaction(db, async (tx) => {
@@ -156,14 +155,18 @@ export async function reserveSlot(id, key, uid, profile) {
       tx.set(ref, {
         data: id,
         createdAt: serverTimestamp(),
-        slots: { ...emptySlots(id), [key]: slot }
+        slots: { [key]: slot },
+        quem: { [uid]: key }
       });
       return;
     }
-    const slots = withEmpty(id, snap.data().slots);
-    if (Object.keys(slots).some((k) => slots[k] && slots[k].uid === uid)) throw new AppError('already');
+    const data = snap.data();
+    const slots = data.slots || {};
+    if ((data.quem && data.quem[uid]) || Object.keys(slots).some((k) => slots[k] && slots[k].uid === uid)) {
+      throw new AppError('already');
+    }
     if (slots[key]) throw new AppError('taken');
-    tx.update(ref, { [`slots.${key}`]: slot });
+    tx.update(ref, { [`slots.${key}`]: slot, [`quem.${uid}`]: key });
   });
 }
 
@@ -171,14 +174,50 @@ export async function releaseSlot(id, key, uid) {
   const ref = scaleRef(id);
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
-    const cur = snap.exists() ? snap.data().slots[key] || null : null;
+    if (!snap.exists()) throw new AppError('notmine');
+    const data = snap.data();
+    const cur = (data.slots || {})[key] || null;
     if (!cur || cur.uid !== uid) throw new AppError('notmine');
-    tx.update(ref, { [`slots.${key}`]: null });
+    const indexed = data.quem && data.quem[uid] === key;
+    tx.update(ref, indexed
+      ? { [`slots.${key}`]: null, [`quem.${uid}`]: deleteField() }
+      : { [`slots.${key}`]: null });
   });
 }
 
+function clearSeatsOf(data, uids) {
+  const slots = data.slots || {};
+  const up = {};
+  for (const k of Object.keys(slots)) {
+    if (slots[k] && uids.includes(slots[k].uid)) up[`slots.${k}`] = null;
+  }
+  for (const u of uids) if (data.quem && u in data.quem) up[`quem.${u}`] = deleteField();
+  return up;
+}
+
 export async function adminRemoveSlot(id, key) {
-  await withTimeout(updateDoc(scaleRef(id), { [`slots.${key}`]: null }), 15000);
+  const ref = scaleRef(id);
+  await withTimeout(runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const data = snap.data();
+    const cur = (data.slots || {})[key];
+    const up = { [`slots.${key}`]: null };
+    if (cur && data.quem && cur.uid in data.quem) up[`quem.${cur.uid}`] = deleteField();
+    tx.update(ref, up);
+  }), 15000);
+}
+
+export async function completeIndex(id) {
+  const ref = scaleRef(id);
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists() || snap.data().quemCompleto === true) return;
+    const slots = snap.data().slots || {};
+    const quem = {};
+    for (const k of Object.keys(slots)) if (slots[k] && slots[k].uid) quem[slots[k].uid] = k;
+    tx.update(ref, { quem, quemCompleto: true });
+  });
 }
 
 export async function getScale(id) {
@@ -217,9 +256,7 @@ export async function deleteUser(uid, scaleIds) {
     for (const id of scaleIds) snaps.push([id, await tx.get(scaleRef(id))]);
     for (const [id, snap] of snaps) {
       if (!snap.exists()) continue;
-      const slots = snap.data().slots || {};
-      const clear = {};
-      for (const k of Object.keys(slots)) if (slots[k] && slots[k].uid === uid) clear[`slots.${k}`] = null;
+      const clear = clearSeatsOf(snap.data(), [uid]);
       if (Object.keys(clear).length) tx.update(scaleRef(id), clear);
     }
     tx.delete(userRef(uid));
@@ -256,7 +293,7 @@ export async function clearErrors(ids) {
 
 export async function rulesUpToDate() {
   try {
-    await getDocFromServer(doc(db, 'meta', 'regras-2-1'));
+    await getDocFromServer(doc(db, 'meta', 'regras-2-2'));
     return true;
   } catch (e) {
     return !(e && e.code === 'permission-denied');

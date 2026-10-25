@@ -4,7 +4,7 @@ rules_version = '2';
 //
 // Modelo:
 //   users/{uid}        perfil do militar (nome de guerra, OM, bloqueio)
-//   escalas/{AAAA-MM-DD} uma escala por dia, com as 9 vagas em um único documento
+//   escalas/{AAAA-MM-DD} uma escala por dia: slots (18 vagas) + quem (uid -> vaga)
 //   config/admin       uid do aparelho principal do administrador (SD EV RIQUELME)
 //   admins/{uid}       outros aparelhos do ADM, liberados com a senha padrão do ADM
 //
@@ -72,10 +72,6 @@ service cloud.firestore {
       return o in ['CIA C', 'PE'];
     }
 
-    function slotKeys() {
-      return ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
-    }
-
     function doubleKeys() {
       return ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3',
               'h1p1b', 'h1p2b', 'h1p3b', 'h2p1b', 'h2p2b', 'h2p3b', 'h3p1b', 'h3p2b', 'h3p3b'];
@@ -118,40 +114,12 @@ service cloud.firestore {
         && request.time < fechamento(dia);
     }
 
-    function notMine(s) {
-      return s == null || s.uid != request.auth.uid;
-    }
+    // Regras das vagas.
+    // O documento da escala guarda, além das vagas (slots), o índice
+    // quem = { uid: vaga } — assim cada verificação olha só UMA vaga e não
+    // precisa varrer as 18 (o Firestore limita a 1.000 expressões por pedido).
 
-    function noneMine(s) {
-      return notMine(sv(s, 'h1p1')) && notMine(sv(s, 'h1p2')) && notMine(sv(s, 'h1p3'))
-        && notMine(sv(s, 'h2p1')) && notMine(sv(s, 'h2p2')) && notMine(sv(s, 'h2p3'))
-        && notMine(sv(s, 'h3p1')) && notMine(sv(s, 'h3p2')) && notMine(sv(s, 'h3p3'))
-        && notMine(sv(s, 'h1p1b')) && notMine(sv(s, 'h1p2b')) && notMine(sv(s, 'h1p3b'))
-        && notMine(sv(s, 'h2p1b')) && notMine(sv(s, 'h2p2b')) && notMine(sv(s, 'h2p3b'))
-        && notMine(sv(s, 'h3p1b')) && notMine(sv(s, 'h3p2b')) && notMine(sv(s, 'h3p3b'));
-    }
-
-    function occ(s) {
-      return s == null ? 0 : 1;
-    }
-
-    function countFilled(s) {
-      return occ(sv(s, 'h1p1')) + occ(sv(s, 'h1p2')) + occ(sv(s, 'h1p3'))
-        + occ(sv(s, 'h2p1')) + occ(sv(s, 'h2p2')) + occ(sv(s, 'h2p3'))
-        + occ(sv(s, 'h3p1')) + occ(sv(s, 'h3p2')) + occ(sv(s, 'h3p3'))
-        + occ(sv(s, 'h1p1b')) + occ(sv(s, 'h1p2b')) + occ(sv(s, 'h1p3b'))
-        + occ(sv(s, 'h2p1b')) + occ(sv(s, 'h2p2b')) + occ(sv(s, 'h2p3b'))
-        + occ(sv(s, 'h3p1b')) + occ(sv(s, 'h3p2b')) + occ(sv(s, 'h3p3b'));
-    }
-
-    function validSlotsShape(dia, s) {
-      return s is map
-        && s.keys().hasAll(slotKeys())
-        && s.keys().hasOnly(doubleKeys());
-    }
-
-    // Vaga que o próprio militar está assumindo agora
-    function validTake(v) {
+    function seatOk(v) {
       return v is map
         && v.keys().hasAll(['uid', 'nome', 'om', 'em'])
         && v.keys().hasOnly(['uid', 'nome', 'om', 'em'])
@@ -161,67 +129,99 @@ service cloud.firestore {
         && v.em == request.time;
     }
 
-    function newSlotOk(v) {
-      return v == null || validTake(v);
-    }
-
     function validCreate(dia) {
       let d = request.resource.data;
-      let s = d.slots;
-      return d.keys().hasAll(['data', 'createdAt', 'slots'])
-        && d.keys().hasOnly(['data', 'createdAt', 'slots'])
+      let q = d.get('quem', {});
+      let k = q.get(request.auth.uid, '');
+      return d.keys().hasAll(['data', 'createdAt', 'slots', 'quem'])
+        && d.keys().hasOnly(['data', 'createdAt', 'slots', 'quem'])
         && d.data == dia
         && d.createdAt == request.time
-        && validSlotsShape(dia, s)
-        && countFilled(s) <= 1
-        && newSlotOk(sv(s, 'h1p1')) && newSlotOk(sv(s, 'h1p2')) && newSlotOk(sv(s, 'h1p3'))
-        && newSlotOk(sv(s, 'h2p1')) && newSlotOk(sv(s, 'h2p2')) && newSlotOk(sv(s, 'h2p3'))
-        && newSlotOk(sv(s, 'h3p1')) && newSlotOk(sv(s, 'h3p2')) && newSlotOk(sv(s, 'h3p3'))
-        && newSlotOk(sv(s, 'h1p1b')) && newSlotOk(sv(s, 'h1p2b')) && newSlotOk(sv(s, 'h1p3b'))
-        && newSlotOk(sv(s, 'h2p1b')) && newSlotOk(sv(s, 'h2p2b')) && newSlotOk(sv(s, 'h2p3b'))
-        && newSlotOk(sv(s, 'h3p1b')) && newSlotOk(sv(s, 'h3p2b')) && newSlotOk(sv(s, 'h3p3b'));
+        && q.keys().hasOnly([request.auth.uid])
+        && k in doubleKeys()
+        && d.slots.keys().hasOnly([k])
+        && seatOk(d.slots[k]);
     }
 
-    // Transição permitida para uma vaga, feita por militar comum:
-    //   sem mudança | livre -> minha (se eu não tiver outra) | minha -> livre
-    function slotTransitionOk(k) {
+    // Escalas criadas antes do índice quem (até 26/10/2026): confere vaga por vaga,
+    // a menos que o ADM já tenha completado o índice (quemCompleto).
+    function notMine(v) {
+      return v == null || v.uid != request.auth.uid;
+    }
+
+    function legacyNoneMine(s) {
+      return notMine(sv(s, 'h1p1')) && notMine(sv(s, 'h1p2')) && notMine(sv(s, 'h1p3'))
+        && notMine(sv(s, 'h2p1')) && notMine(sv(s, 'h2p2')) && notMine(sv(s, 'h2p3'))
+        && notMine(sv(s, 'h3p1')) && notMine(sv(s, 'h3p2')) && notMine(sv(s, 'h3p3'))
+        && notMine(sv(s, 'h1p1b')) && notMine(sv(s, 'h1p2b')) && notMine(sv(s, 'h1p3b'))
+        && notMine(sv(s, 'h2p1b')) && notMine(sv(s, 'h2p2b')) && notMine(sv(s, 'h2p3b'))
+        && notMine(sv(s, 'h3p1b')) && notMine(sv(s, 'h3p2b')) && notMine(sv(s, 'h3p3b'));
+    }
+
+    // Assumir a vaga k: quem ganha exatamente minha entrada e slots muda só em k
+    function validTake(dia) {
+      let n = request.resource.data;
+      let o = resource.data;
+      let oq = o.get('quem', {});
+      let nq = n.get('quem', {});
+      let k = nq.get(request.auth.uid, '');
+      return n.diff(o).affectedKeys().hasOnly(['slots', 'quem'])
+        && !(request.auth.uid in oq)
+        && k in doubleKeys()
+        && nq.diff(oq).affectedKeys().hasOnly([request.auth.uid])
+        && n.slots.diff(o.slots).affectedKeys().hasOnly([k])
+        && sv(o.slots, k) == null
+        && seatOk(n.slots[k])
+        && (dia > '2026-10-26' || o.get('quemCompleto', false) == true || legacyNoneMine(o.slots));
+    }
+
+    // Liberar a própria vaga k (registrada no índice quem)
+    function validRelease() {
+      let n = request.resource.data;
+      let o = resource.data;
+      let oq = o.get('quem', {});
+      let nq = n.get('quem', {});
+      let k = oq.get(request.auth.uid, '');
+      return n.diff(o).affectedKeys().hasOnly(['slots', 'quem'])
+        && k in doubleKeys()
+        && !(request.auth.uid in nq)
+        && nq.diff(oq).affectedKeys().hasOnly([request.auth.uid])
+        && n.slots.diff(o.slots).affectedKeys().hasOnly([k])
+        && sv(o.slots, k) != null
+        && sv(o.slots, k).uid == request.auth.uid
+        && sv(n.slots, k) == null;
+    }
+
+    // Liberar vaga em escala antiga, reservada antes do índice quem existir
+    function legacyReleaseOk(k) {
       let a = sv(resource.data.slots, k);
       let b = sv(request.resource.data.slots, k);
-      return a == b
-        || (a == null && validTake(b) && noneMine(resource.data.slots))
-        || (a != null && a.uid == request.auth.uid && b == null);
+      return a == b || (a != null && a.uid == request.auth.uid && b == null);
     }
 
-    function validUserUpdate(dia) {
-      let s = request.resource.data.slots;
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slots'])
-        && validSlotsShape(dia, s)
-        && s.diff(resource.data.slots).affectedKeys().size() == 1
-        && slotTransitionOk('h1p1') && slotTransitionOk('h1p2') && slotTransitionOk('h1p3')
-        && slotTransitionOk('h2p1') && slotTransitionOk('h2p2') && slotTransitionOk('h2p3')
-        && slotTransitionOk('h3p1') && slotTransitionOk('h3p2') && slotTransitionOk('h3p3')
-        && slotTransitionOk('h1p1b') && slotTransitionOk('h1p2b') && slotTransitionOk('h1p3b')
-        && slotTransitionOk('h2p1b') && slotTransitionOk('h2p2b') && slotTransitionOk('h2p3b')
-        && slotTransitionOk('h3p1b') && slotTransitionOk('h3p2b') && slotTransitionOk('h3p3b');
+    function validLegacyRelease() {
+      let n = request.resource.data;
+      let o = resource.data;
+      return n.diff(o).affectedKeys().hasOnly(['slots'])
+        && !(request.auth.uid in o.get('quem', {}))
+        && n.slots.diff(o.slots).affectedKeys().size() == 1
+        && n.slots.keys().hasOnly(doubleKeys())
+        && legacyReleaseOk('h1p1') && legacyReleaseOk('h1p2') && legacyReleaseOk('h1p3')
+        && legacyReleaseOk('h2p1') && legacyReleaseOk('h2p2') && legacyReleaseOk('h2p3')
+        && legacyReleaseOk('h3p1') && legacyReleaseOk('h3p2') && legacyReleaseOk('h3p3')
+        && legacyReleaseOk('h1p1b') && legacyReleaseOk('h1p2b') && legacyReleaseOk('h1p3b')
+        && legacyReleaseOk('h2p1b') && legacyReleaseOk('h2p2b') && legacyReleaseOk('h2p3b')
+        && legacyReleaseOk('h3p1b') && legacyReleaseOk('h3p2b') && legacyReleaseOk('h3p3b');
     }
 
-    // Administrador: pode apenas liberar (remover) vagas, em qualquer escala
-    function adminSlotOk(k) {
-      let a = sv(resource.data.slots, k);
-      let b = sv(request.resource.data.slots, k);
-      return a == b || b == null;
-    }
-
-    function validAdminUpdate(dia) {
-      let s = request.resource.data.slots;
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['slots'])
-        && validSlotsShape(dia, s)
-        && adminSlotOk('h1p1') && adminSlotOk('h1p2') && adminSlotOk('h1p3')
-        && adminSlotOk('h2p1') && adminSlotOk('h2p2') && adminSlotOk('h2p3')
-        && adminSlotOk('h3p1') && adminSlotOk('h3p2') && adminSlotOk('h3p3')
-        && adminSlotOk('h1p1b') && adminSlotOk('h1p2b') && adminSlotOk('h1p3b')
-        && adminSlotOk('h2p1b') && adminSlotOk('h2p2b') && adminSlotOk('h2p3b')
-        && adminSlotOk('h3p1b') && adminSlotOk('h3p2b') && adminSlotOk('h3p3b');
+    // Administrador: remove militares de vagas e completa o índice quem de escalas antigas
+    function validAdminUpdate() {
+      let n = request.resource.data;
+      let o = resource.data;
+      return n.diff(o).affectedKeys().hasOnly(['slots', 'quem', 'quemCompleto'])
+        && n.slots is map
+        && n.slots.keys().hasOnly(doubleKeys())
+        && n.get('quem', {}) is map;
     }
 
     function validNewUser(uid) {
@@ -303,7 +303,7 @@ service cloud.firestore {
     }
 
     // Marcador de versão das regras: o app confere se estas regras foram publicadas
-    match /meta/regras-2-1 {
+    match /meta/regras-2-2 {
       allow get: if signedIn();
       allow write: if false;
     }
@@ -311,8 +311,9 @@ service cloud.firestore {
     match /escalas/{dia} {
       allow read: if hasProfile();
       allow create: if activeUser() && janelaAberta(dia) && validCreate(dia);
-      allow update: if (activeUser() && janelaAberta(dia) && validUserUpdate(dia))
-        || (isAdmin() && validAdminUpdate(dia));
+      allow update: if (activeUser() && janelaAberta(dia)
+          && (validTake(dia) || validRelease() || validLegacyRelease()))
+        || (isAdmin() && validAdminUpdate());
       allow delete: if false;
     }
 

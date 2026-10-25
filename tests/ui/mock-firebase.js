@@ -80,3 +80,4 @@ export async function logError(uid, nome, acao, err, escala = '') {
 export async function listErrors() { return store.errors; }
 export async function clearErrors() { store.errors = []; }
 export async function rulesUpToDate() { return M.rulesOk !== false; }
+export async function completeIndex() {}

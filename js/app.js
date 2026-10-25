@@ -2,14 +2,14 @@ import {
   ADMIN_NAME, AppError, ensureAuth, getProfile, watchProfile, checkAdmin,
   registerUser, syncServerClock, watchScale, reserveSlot, releaseSlot, adminRemoveSlot,
   getScale, listHistory, listUsers, setUserBlocked, deleteUser, logError, listErrors,
-  clearErrors, rulesUpToDate
-} from './firebase.js?v=2.1.0';
-import { isDouble, seatsOf, capacityOf, keyInfo } from './escala.js?v=2.1.0';
-import { APP_VERSION, NOVIDADES } from './versao.js?v=2.1.0';
+  clearErrors, rulesUpToDate, completeIndex
+} from './firebase.js?v=2.2.0';
+import { isDouble, seatsOf, capacityOf, keyInfo } from './escala.js?v=2.2.0';
+import { APP_VERSION, NOVIDADES } from './versao.js?v=2.2.0';
 import {
   STATUS, todayId, nextScaleId, addDays, weekdayName, openingMs, scaleStatus,
   formatBR, formatClock, formatDateTime, formatCountdown, greeting, openingHour
-} from './time.js?v=2.1.0';
+} from './time.js?v=2.2.0';
 
 const WHATSAPP_GROUP = 'https://chat.whatsapp.com/CT5EigeEZAr36FZMgSYE2r?s=cl&p=i&mlu=4&ilr=4';
 const SHIFT_NAMES = ['PRIMEIRO HORÁRIO', 'SEGUNDO HORÁRIO', 'TERCEIRO HORÁRIO'];
@@ -377,11 +377,17 @@ function renderHome() {
   renderSlots($('slotsHome'), S.slots, { live: true, status: st, hasMine: !!mine }, S.scaleId);
 }
 
+function prepareScaleIndex() {
+  if (!S.isAdmin || !S.scaleId || S.scaleId > '2026-10-26') return;
+  completeIndex(S.scaleId).catch((e) => logError(S.uid, S.profile ? S.profile.nome : '', 'adm-indice', e, S.scaleId));
+}
+
 function startScale() {
   if (S.unsubScale) S.unsubScale();
   S.scaleId = nextScaleId(now());
   S.slots = null;
   S.history = null;
+  prepareScaleIndex();
   renderHome();
   S.unsubScale = watchScale(S.scaleId, (data) => {
     const before = mySlotKey(S.slots);
@@ -768,6 +774,7 @@ async function enter(profile) {
   checkAdmin(S.uid).then((adm) => {
     const was = S.isAdmin;
     S.isAdmin = adm;
+    if (adm) prepareScaleIndex();
     if (S.isAdmin && !was && profile.nome === ADMIN_NAME) toast('Acesso de administrador ativo.', 'ok');
     route();
   });

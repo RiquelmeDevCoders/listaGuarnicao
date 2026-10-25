@@ -44,6 +44,8 @@ escalas/{AAAA-MM-DD}               uma escala por dia (o ID é a data da escala)
   slots
     h1p1 … h3p3                    vaga 1 de cada posto (1º/2º/3º horário × P1/P2/P3)
     h1p1b … h3p3b                  vaga 2 de cada posto (posto duplo)
+  quem                             índice { uid: vaga } — usado pelas regras para validar cada reserva
+                                   olhando uma vaga só (o Firestore limita cada regra a 1.000 expressões)
       null                         vaga livre
       { uid, nome, om, em }        vaga ocupada (em = horário do servidor)
 

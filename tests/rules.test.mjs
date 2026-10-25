@@ -6,7 +6,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, writeBatch, collection,
-  serverTimestamp, runTransaction, Timestamp
+  serverTimestamp, runTransaction, Timestamp, deleteField
 } from 'firebase/firestore';
 import { nextScaleId, todayId, addDays, openingMs } from '../js/time.js';
 import { emptySlots } from '../js/escala.js';
@@ -34,11 +34,12 @@ async function seedUser(uid, nome, om = 'CIA C', bloqueado = false) {
   });
 }
 
-async function seedScale(id, slots = {}) {
+async function seedScale(id, slots = {}, legacy = false) {
+  const quem = Object.fromEntries(Object.entries(slots).filter(([, v]) => v).map(([k, v]) => [v.uid, k]));
   await env.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'escalas', id), {
-      data: id, createdAt: Timestamp.now(), slots: { ...empty(id), ...slots }
-    });
+    await setDoc(doc(ctx.firestore(), 'escalas', id), legacy
+      ? { data: id, createdAt: Timestamp.now(), slots: { ...empty(id), ...slots } }
+      : { data: id, createdAt: Timestamp.now(), slots, quem });
   });
 }
 
@@ -50,6 +51,9 @@ async function seedAdmin(uid) {
 }
 
 const slot = (uid, nome, om = 'CIA C') => ({ uid, nome, om, em: serverTimestamp() });
+const take = (uid, k, nome, om = 'CIA C') => ({ [`slots.${k}`]: slot(uid, nome, om), [`quem.${uid}`]: k });
+const release = (uid, k) => ({ [`slots.${k}`]: null, [`quem.${uid}`]: deleteField() });
+const createWith = (id, uid, k, nome) => ({ data: id, createdAt: serverTimestamp(), slots: { [k]: slot(uid, nome) }, quem: { [uid]: k } });
 const stored = (uid, nome, om = 'CIA C') => ({ uid, nome, om, em: Timestamp.now() });
 
 const newUser = (nome, om = 'CIA C', extra = {}) => ({
@@ -125,17 +129,13 @@ test('escala: só lê quem tem cadastro', async () => {
 test('não é possível criar escala de hoje, de depois de amanhã ou com data inválida', async () => {
   await seedUser('a', 'SILVA');
   for (const id of [TODAY, FUTURE, '2026-13-01', 'qualquer']) {
-    await assertFails(setDoc(doc(db('a'), 'escalas', id), {
-      data: id, createdAt: serverTimestamp(), slots: { ...empty(), h1p1: slot('a', 'SILVA') }
-    }));
+    await assertFails(setDoc(doc(db('a'), 'escalas', id), createWith(id, 'a', 'h1p1', 'SILVA')));
   }
 });
 
 test('criação da escala de amanhã respeita o horário do servidor', async () => {
   await seedUser('a', 'SILVA');
-  const p = setDoc(doc(db('a'), 'escalas', TOMORROW), {
-    data: TOMORROW, createdAt: serverTimestamp(), slots: { ...empty(), h2p2: slot('a', 'SILVA') }
-  });
+  const p = setDoc(doc(db('a'), 'escalas', TOMORROW), createWith(TOMORROW, 'a', 'h2p2', 'SILVA'));
   if (OPEN) await assertSucceeds(p);
   else await assertFails(p);
 });
@@ -144,12 +144,13 @@ test('criação inválida da escala de amanhã', { skip: !OPEN && 'fora do horá
   await seedUser('a', 'SILVA');
   const ref = doc(db('a'), 'escalas', TOMORROW);
   const base = { data: TOMORROW, createdAt: serverTimestamp() };
-  await assertFails(setDoc(ref, { ...base, slots: { ...empty(), h1p1: slot('a', 'SILVA'), h1p2: slot('a', 'SILVA') } }));
-  await assertFails(setDoc(ref, { ...base, slots: { ...empty(), h1p1: slot('b', 'SOUZA') } }));
-  await assertFails(setDoc(ref, { ...base, slots: { ...empty(), h1p1: slot('a', 'FALSO') } }));
-  await assertFails(setDoc(ref, { ...base, slots: { ...empty(), h4p1: slot('a', 'SILVA') } }));
-  await assertFails(setDoc(ref, { ...base, data: FUTURE, slots: empty() }));
-  await assertFails(setDoc(ref, { ...base, slots: empty(), extra: 1 }));
+  await assertFails(setDoc(ref, { ...base, slots: { h1p1: slot('a', 'SILVA'), h1p2: slot('a', 'SILVA') }, quem: { a: 'h1p1' } }));
+  await assertFails(setDoc(ref, { ...base, slots: { h1p1: slot('b', 'SOUZA') }, quem: { b: 'h1p1' } }));
+  await assertFails(setDoc(ref, { ...base, slots: { h1p1: slot('a', 'FALSO') }, quem: { a: 'h1p1' } }));
+  await assertFails(setDoc(ref, { ...base, slots: { h4p1: slot('a', 'SILVA') }, quem: { a: 'h4p1' } }));
+  await assertFails(setDoc(ref, { ...createWith(TOMORROW, 'a', 'h1p1', 'SILVA'), data: FUTURE }));
+  await assertFails(setDoc(ref, { ...createWith(TOMORROW, 'a', 'h1p1', 'SILVA'), extra: 1 }));
+  await assertFails(setDoc(ref, { ...base, slots: { h1p1: slot('a', 'SILVA') }, quem: { a: 'h1p2' } }));
 });
 
 test('reserva, vaga ocupada, segunda vaga, cancelamento', { skip: !OPEN && 'fora do horário de abertura' }, async () => {
@@ -157,19 +158,21 @@ test('reserva, vaga ocupada, segunda vaga, cancelamento', { skip: !OPEN && 'fora
   await seedUser('b', 'SOUZA', 'PE');
   await seedScale(TOMORROW, { h1p1: stored('b', 'SOUZA', 'PE') });
   const refA = doc(db('a'), 'escalas', TOMORROW);
-  await assertFails(updateDoc(refA, { 'slots.h1p1': slot('a', 'SILVA') }));
+  await assertFails(updateDoc(refA, take('a', 'h1p1', 'SILVA')));
+  await assertFails(updateDoc(refA, release('b', 'h1p1')));
   await assertFails(updateDoc(refA, { 'slots.h1p1': null }));
-  await assertFails(updateDoc(refA, { 'slots.h1p2': slot('b', 'SOUZA', 'PE') }));
-  await assertFails(updateDoc(refA, { 'slots.h1p2': { ...slot('a', 'SILVA'), om: 'PE' } }));
-  await assertFails(updateDoc(refA, { 'slots.h1p2': { ...slot('a', 'SILVA'), em: Timestamp.fromMillis(0) } }));
-  await assertFails(updateDoc(refA, { 'slots.h1p2': slot('a', 'SILVA'), 'slots.h1p3': slot('a', 'SILVA') }));
-  await assertFails(updateDoc(refA, { 'slots.h9p9': slot('a', 'SILVA') }));
+  await assertFails(updateDoc(refA, take('b', 'h1p2', 'SOUZA', 'PE')));
+  await assertFails(updateDoc(refA, take('a', 'h1p2', 'SILVA', 'PE')));
+  await assertFails(updateDoc(refA, { 'slots.h1p2': { ...slot('a', 'SILVA'), em: Timestamp.fromMillis(0) }, 'quem.a': 'h1p2' }));
+  await assertFails(updateDoc(refA, { ...take('a', 'h1p2', 'SILVA'), 'slots.h1p3': slot('a', 'SILVA') }));
+  await assertFails(updateDoc(refA, { 'slots.h1p2': slot('a', 'SILVA') }));
+  await assertFails(updateDoc(refA, { 'slots.h1p2': slot('a', 'SILVA'), 'quem.a': 'h1p3' }));
+  await assertFails(updateDoc(refA, take('a', 'h9p9', 'SILVA')));
   await assertFails(updateDoc(refA, { data: FUTURE }));
-  await assertSucceeds(updateDoc(refA, { 'slots.h2p2': slot('a', 'SILVA') }));
-  await assertFails(updateDoc(refA, { 'slots.h3p3': slot('a', 'SILVA') }));
-  await assertFails(updateDoc(refA, { 'slots.h2p2': null, 'slots.h3p3': slot('a', 'SILVA') }));
-  await assertSucceeds(updateDoc(refA, { 'slots.h2p2': null }));
-  await assertSucceeds(updateDoc(refA, { 'slots.h3p3': slot('a', 'SILVA') }));
+  await assertSucceeds(updateDoc(refA, take('a', 'h2p2', 'SILVA')));
+  await assertFails(updateDoc(refA, take('a', 'h3p3', 'SILVA')));
+  await assertSucceeds(updateDoc(refA, release('a', 'h2p2')));
+  await assertSucceeds(updateDoc(refA, take('a', 'h3p3', 'SILVA')));
   await assertFails(deleteDoc(refA));
 });
 
@@ -184,11 +187,11 @@ test('concorrência: 10 militares disputando a mesma vaga, apenas 1 consegue', {
       const nome = `MILITAR ${String.fromCharCode(65 + Number(u.slice(1)))}`;
       const s = { uid: u, nome, om: 'CIA C', em: serverTimestamp() };
       if (!snap.exists()) {
-        tx.set(ref, { data: TOMORROW, createdAt: serverTimestamp(), slots: { ...empty(), h2p2: s } });
+        tx.set(ref, { data: TOMORROW, createdAt: serverTimestamp(), slots: { h2p2: s }, quem: { [u]: 'h2p2' } });
         return;
       }
       if (snap.data().slots.h2p2) throw new Error('taken');
-      tx.update(ref, { 'slots.h2p2': s });
+      tx.update(ref, { 'slots.h2p2': s, [`quem.${u}`]: 'h2p2' });
     });
   }));
   assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
@@ -200,14 +203,14 @@ test('concorrência: 10 militares disputando a mesma vaga, apenas 1 consegue', {
 test('militar bloqueado não reserva', { skip: !OPEN && 'fora do horário de abertura' }, async () => {
   await seedUser('a', 'SILVA', 'CIA C', true);
   await seedScale(TOMORROW);
-  await assertFails(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h1p1': slot('a', 'SILVA') }));
+  await assertFails(updateDoc(doc(db('a'), 'escalas', TOMORROW), take('a', 'h1p1', 'SILVA')));
 });
 
 test('escala antiga não pode ser alterada por militar comum', async () => {
   await seedUser('a', 'SILVA');
   await seedScale(TODAY, { h1p1: stored('a', 'SILVA') });
-  await assertFails(updateDoc(doc(db('a'), 'escalas', TODAY), { 'slots.h1p1': null }));
-  await assertFails(updateDoc(doc(db('a'), 'escalas', TODAY), { 'slots.h1p2': slot('a', 'SILVA') }));
+  await assertFails(updateDoc(doc(db('a'), 'escalas', TODAY), release('a', 'h1p1')));
+  await assertFails(updateDoc(doc(db('a'), 'escalas', TODAY), take('a', 'h1p2', 'SILVA')));
   await assertFails(deleteDoc(doc(db('a'), 'escalas', TODAY)));
 });
 
@@ -216,8 +219,8 @@ test('administrador: remove vagas, lista e bloqueia militares', async () => {
   await seedUser('a', 'SILVA');
   await seedScale(TODAY, { h1p1: stored('a', 'SILVA') });
   const ref = doc(db('adm'), 'escalas', TODAY);
-  await assertFails(updateDoc(ref, { 'slots.h1p2': slot('a', 'SILVA') }));
-  await assertSucceeds(updateDoc(ref, { 'slots.h1p1': null }));
+  await assertFails(updateDoc(ref, { 'slots.h1p2': slot('a', 'SILVA'), extra: 1 }));
+  await assertSucceeds(updateDoc(ref, release('a', 'h1p1')));
   await assertFails(deleteDoc(ref));
   await assertSucceeds(getDocs(collection(db('adm'), 'users')));
   await assertSucceeds(updateDoc(doc(db('adm'), 'users', 'a'), { bloqueado: true }));
@@ -261,11 +264,11 @@ test('posto duplo: 2 militares no mesmo posto, nunca 3', { skip: !OPEN && 'fora 
   await seedUser('b', 'SOUZA', 'PE');
   await seedUser('c', 'COSTA');
   await seedScale(TOMORROW);
-  await assertSucceeds(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h1p1': slot('a', 'SILVA') }));
-  await assertSucceeds(updateDoc(doc(db('b'), 'escalas', TOMORROW), { 'slots.h1p1b': slot('b', 'SOUZA', 'PE') }));
-  await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), { 'slots.h1p1b': slot('c', 'COSTA') }));
-  await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), { 'slots.h1p1c': slot('c', 'COSTA') }));
-  await assertFails(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h2p2b': slot('a', 'SILVA') }));
+  await assertSucceeds(updateDoc(doc(db('a'), 'escalas', TOMORROW), take('a', 'h1p1', 'SILVA')));
+  await assertSucceeds(updateDoc(doc(db('b'), 'escalas', TOMORROW), take('b', 'h1p1b', 'SOUZA', 'PE')));
+  await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), take('c', 'h1p1b', 'COSTA')));
+  await assertFails(updateDoc(doc(db('c'), 'escalas', TOMORROW), take('c', 'h1p1c', 'COSTA')));
+  await assertFails(updateDoc(doc(db('a'), 'escalas', TOMORROW), take('a', 'h2p2b', 'SILVA')));
 });
 
 test('ADM exclui militar; militar comum não exclui', async () => {
@@ -288,4 +291,10 @@ test('registro de erros: militar grava, só ADM lê', async () => {
   await assertSucceeds(getDocs(collection(db('adm'), 'erros')));
   await assertSucceeds(deleteDoc(doc(db('adm'), 'erros', 'e1')));
   await assertSucceeds(getDoc(doc(db('a'), 'meta', 'regras-2-1')));
+});
+
+test('escala antiga sem índice: militar libera a própria vaga', { skip: !OPEN && 'fora do horário de abertura' }, async () => {
+  await seedUser('a', 'SILVA');
+  await seedScale(TOMORROW, { h1p1: stored('a', 'SILVA') }, true);
+  await assertSucceeds(updateDoc(doc(db('a'), 'escalas', TOMORROW), { 'slots.h1p1': null }));
 });
