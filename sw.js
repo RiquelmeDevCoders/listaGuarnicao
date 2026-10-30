@@ -1,5 +1,5 @@
-const CACHE = 'escala-sdev-2.2.0';
-const V = '2.2.0';
+const CACHE = 'escala-sdev-2.3.0';
+const V = '2.3.0';
 const SHELL = [
   './',
   'index.html',

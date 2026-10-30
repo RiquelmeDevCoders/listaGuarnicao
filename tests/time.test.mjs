@@ -71,3 +71,14 @@ test('cálculo de dia da semana das regras = JavaScript', () => {
 test('formato de data', () => {
   assert.equal(formatBR('2026-10-05'), '05/10/2026');
 });
+
+test('posto duplo só entre 25/10 e 30/10/2026', async () => {
+  const { isDouble, capacityOf } = await import('../js/escala.js');
+  assert.equal(isDouble('2026-10-24'), false);
+  assert.equal(isDouble('2026-10-25'), true);
+  assert.equal(isDouble('2026-10-30'), true);
+  assert.equal(isDouble('2026-10-31'), false);
+  assert.equal(isDouble('2026-11-01'), false);
+  assert.equal(capacityOf('2026-11-01'), 9);
+  assert.equal(capacityOf('2026-10-28'), 18);
+});

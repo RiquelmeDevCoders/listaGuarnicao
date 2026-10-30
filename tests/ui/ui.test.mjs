@@ -323,7 +323,7 @@ test('posto duplo: escala cheia com 18 e histórico antigo segue com 9', async (
 test('mensagem de nova versão aparece uma vez e aviso de atualização', async () => {
   const page = await open({ ...me(), showNovidades: true }, { at: brt(2026, 10, 24, 19) });
   await page.waitForSelector('#modal[open]');
-  assert.match(await page.textContent('#modalText'), /SD EV RIQUELME[\s\S]*DUPLO[\s\S]*parar de rodar na 24 KKKKKKKKKKK/);
+  assert.match(await page.textContent('#modalText'), /SD EV RIQUELME[\s\S]*posto normal[\s\S]*parar de rodar na 24 KKKKKKKKKKK/);
   assert.equal(await page.locator('#modal button[value="cancel"].hidden').count(), 1);
   await shot(page, '14-novidades');
   await page.click('#modalOk');
@@ -392,5 +392,55 @@ test('militar excluído volta para o cadastro', async () => {
   await page.waitForSelector('#slotsHome .slot');
   await page.evaluate(() => { delete window.__mock.store.users.me; window.__mock.profileCb(null, false); });
   await page.waitForSelector('#view-register:not(.hidden)');
+  await page.context().close();
+});
+
+test('posto normal em 01/11/2026: 1 militar por posto, 9 vagas', async () => {
+  const page = await open({ ...me(), escalas: { '2026-10-31': { h1p1b: { uid: 'b', nome: 'BRITO', om: 'PE' } } } }, { at: brt(2026, 10, 31, 16, 30) });
+  await page.waitForSelector('[data-act="take"]');
+  assert.equal(await page.textContent('#scaleDate'), '01/11/2026');
+  assert.match(await page.textContent('#scaleCount'), /0 de 9/);
+  assert.equal(await page.locator('#slotsHome .post.double').count(), 0);
+  assert.equal(await page.locator('#slotsHome .slot').count(), 9);
+  await page.click('[data-key="h1p1"]');
+  assert.doesNotMatch(await page.textContent('#modalText'), /duplo/i);
+  await page.click('#modalOk');
+  await page.waitForSelector('.slot.mine');
+  assert.match(await page.textContent('#scaleCount'), /1 de 9/);
+  await page.evaluate(() => { navigator.share = async (d) => { window.__shared.push(d); }; });
+  await page.click('#btnShareScale');
+  const t = (await page.evaluate(() => window.__shared))[0].text;
+  assert.match(t, /\*Vagas preenchidas: 1 de 9\* — faltam 8/);
+  assert.match(t, /\*1º HORÁRIO\* \(1\/3\)\nP1 - SILVA \| CIA C\nP2 - \nP3 - \n/);
+  await shot(page, '16-posto-normal');
+  await page.click('a[href="#historico"]');
+  await page.waitForSelector('.hist-item');
+  assert.match(await page.textContent('.hist-item'), /31\/10\/2026[\s\S]*0\/9/);
+  await page.context().close();
+});
+
+test('sábado 31/10 já é posto normal e mantém quem estava na vaga 2', async () => {
+  const page = await open({ ...me(), escalas: { '2026-10-31': {
+    h1p1: { uid: 'a', nome: 'ALVES', om: 'PE' },
+    h1p1b: { uid: 'b', nome: 'BRITO', om: 'CIA C' },
+    h2p3b: { uid: 'me', nome: 'SILVA', om: 'CIA C' }
+  } } }, { at: brt(2026, 10, 30, 19) });
+  await page.waitForSelector('#slotsHome .slot');
+  assert.equal(await page.textContent('#scaleDate'), '31/10/2026');
+  assert.equal(await page.locator('#slotsHome .post.double').count(), 0);
+  assert.equal(await page.locator('#slotsHome .slot').count(), 11);
+  assert.match(await page.textContent('#slotsHome'), /Vaga 2 \(posto duplo\)[\s\S]*BRITO/);
+  assert.match(await page.textContent('#scaleCount'), /1 de 9/);
+  assert.match(await page.textContent('#notice'), /Você já está escalado/);
+  await page.click('[data-act="release"]');
+  await page.click('#modalOk');
+  await page.waitForFunction(() => !document.querySelector('.slot.mine'));
+  assert.equal(await page.locator('[data-key="h2p3b"]').count(), 0);
+  assert.equal(await page.locator('#slotsHome .slot').count(), 10);
+  await page.click('[data-key="h2p3"]');
+  await page.click('#modalOk');
+  await page.waitForSelector('.slot.mine');
+  assert.match(await page.textContent('#scaleCount'), /2 de 9/);
+  await shot(page, '17-sabado-normal');
   await page.context().close();
 });

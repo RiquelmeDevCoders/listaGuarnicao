@@ -3,13 +3,13 @@ import {
   registerUser, syncServerClock, watchScale, reserveSlot, releaseSlot, adminRemoveSlot,
   getScale, listHistory, listUsers, setUserBlocked, deleteUser, logError, listErrors,
   clearErrors, rulesUpToDate, completeIndex
-} from './firebase.js?v=2.2.0';
-import { isDouble, seatsOf, capacityOf, keyInfo } from './escala.js?v=2.2.0';
-import { APP_VERSION, NOVIDADES } from './versao.js?v=2.2.0';
+} from './firebase.js?v=2.3.0';
+import { isDouble, seatsShown, keysFor, capacityOf, keyInfo } from './escala.js?v=2.3.0';
+import { APP_VERSION, NOVIDADES } from './versao.js?v=2.3.0';
 import {
   STATUS, todayId, nextScaleId, addDays, weekdayName, openingMs, scaleStatus,
   formatBR, formatClock, formatDateTime, formatCountdown, greeting, openingHour
-} from './time.js?v=2.2.0';
+} from './time.js?v=2.3.0';
 
 const WHATSAPP_GROUP = 'https://chat.whatsapp.com/CT5EigeEZAr36FZMgSYE2r?s=cl&p=i&mlu=4&ilr=4';
 const SHIFT_NAMES = ['PRIMEIRO HORÁRIO', 'SEGUNDO HORÁRIO', 'TERCEIRO HORÁRIO'];
@@ -63,7 +63,7 @@ const S = {
 const $ = (id) => document.getElementById(id);
 const now = () => Date.now() + S.offset;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const filledCount = (slots) => (slots ? Object.values(slots).filter(Boolean).length : 0);
+const filledCount = (slots, id) => (slots ? keysFor(id).filter((k) => slots[k]).length : 0);
 const mySlotKey = (slots) => (slots ? Object.keys(slots).find((k) => slots[k] && slots[k].uid === S.uid) : null) || null;
 const seatLabel = (id, k) => {
   const { h, p, seat } = keyInfo(k);
@@ -207,18 +207,18 @@ async function copyText(text) {
 
 function scaleText(id, slots) {
   const cap = capacityOf(id);
-  const n = filledCount(slots);
+  const n = filledCount(slots, id);
   const lines = [
     '*LISTA DA GUARNIÇÃO*',
     `Escala de ${weekdayName(id)} — ${formatBR(id)}`,
     `*Vagas preenchidas: ${n} de ${cap}*${n >= cap ? ' — ESCALA COMPLETA' : ` — faltam ${cap - n}`}`
   ];
   for (let h = 1; h <= 3; h++) {
-    const hk = Object.keys(slots || {}).filter((k) => k[1] === String(h));
+    const hk = keysFor(id).filter((k) => k[1] === String(h));
     const hn = hk.filter((k) => slots[k]).length;
     lines.push('', `*${h}º HORÁRIO* (${hn}/${cap / 3})`);
     for (let p = 1; p <= 3; p++) {
-      for (const k of seatsOf(id, h, p)) {
+      for (const k of seatsShown(id, h, p, slots)) {
         const s = slots && slots[k];
         lines.push(`P${p} - ${s ? `${s.nome} | ${s.om}` : ''}`);
       }
@@ -251,7 +251,7 @@ function seatHtml(key, slot, ctx) {
   const mine = slot && slot.uid === S.uid;
   const cls = !slot ? 'free' : mine ? 'mine' : 'taken';
   const stateTxt = !slot ? 'Livre' : mine ? 'Sua vaga' : 'Ocupada';
-  const state = ctx.double ? `Vaga ${seat} · ${stateTxt}` : stateTxt;
+  const state = ctx.double ? `Vaga ${seat} · ${stateTxt}` : seat === 2 ? `Vaga 2 (posto duplo) · ${stateTxt}` : stateTxt;
   const name = slot
     ? `${esc(slot.nome)} <span class="om">| ${esc(slot.om)}</span>`
     : 'Disponível';
@@ -288,7 +288,7 @@ function renderSlots(container, slots, ctx, id) {
       <div class="shift-head"><span class="shift-num">${h}º</span><h2 class="shift-name">${SHIFT_NAMES[h - 1]}</h2></div>
       <ul class="shift-list">`;
     for (let p = 1; p <= 3; p++) {
-      const seats = seatsOf(id, h, p).map((k) => seatHtml(k, slots ? slots[k] : null, c)).join('');
+      const seats = seatsShown(id, h, p, slots).map((k) => seatHtml(k, slots ? slots[k] : null, c)).join('');
       html += `<li class="post${double ? ' double' : ''}">
         <span class="slot-post" aria-hidden="true">P${p}${double ? '<small>DUPLO</small>' : ''}</span>
         <ul class="seats" aria-label="P${p}${double ? ', posto duplo' : ''}">${seats}</ul>
@@ -314,7 +314,7 @@ function setStatus(el, st) {
 }
 
 function currentStatus() {
-  return scaleStatus(S.scaleId, now(), filledCount(S.slots), capacityOf(S.scaleId));
+  return scaleStatus(S.scaleId, now(), filledCount(S.slots, S.scaleId), capacityOf(S.scaleId));
 }
 
 function renderTopLines() {
@@ -362,7 +362,7 @@ function renderHome() {
   $('helloNome').textContent = S.profile.nome;
   $('helloOm').textContent = S.profile.om;
   renderTopLines();
-  const filled = filledCount(S.slots);
+  const filled = filledCount(S.slots, S.scaleId);
   const st = currentStatus();
   S.lastStatus = st;
   const mine = mySlotKey(S.slots);
@@ -534,7 +534,7 @@ async function openHistory() {
     return;
   }
   list.innerHTML = S.history.map(({ id, slots }) => {
-    const n = filledCount(slots);
+    const n = filledCount(slots, id);
     const cap = capacityOf(id);
     return `<li><a class="hist-item" href="#historico/${id}">
       <span>
@@ -563,7 +563,7 @@ async function openDetail(id, force = false) {
   }
   if (S.detailId !== id) return;
   S.detailSlots = slots;
-  const n = filledCount(slots);
+  const n = filledCount(slots, id);
   const cap = capacityOf(id);
   setStatus($('detStatus'), scaleStatus(id, now(), n, cap));
   $('detCount').textContent = `${n} de ${cap} vagas preenchidas`;

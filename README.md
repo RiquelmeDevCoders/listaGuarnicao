@@ -16,7 +16,7 @@ css/style.css           visual militar, mobile first
 js/app.js               interface, rotas (#historico, #admin), regras de tela
 js/firebase.js          configuração do Firebase e todas as operações no banco
 js/time.js              datas e horários em America/Sao_Paulo
-js/escala.js            vagas da escala (posto duplo)
+js/escala.js            vagas da escala (posto normal; posto duplo só no período de 25/10 a 30/10/2026)
 js/versao.js            versão atual e mensagem de novidades
 version.json            versão publicada (avisa quem está com versão antiga)
 manifest.json           PWA (nome, ícones, tela cheia)
@@ -42,8 +42,8 @@ escalas/{AAAA-MM-DD}               uma escala por dia (o ID é a data da escala)
   data        "2026-10-05"
   createdAt   timestamp do servidor
   slots
-    h1p1 … h3p3                    vaga 1 de cada posto (1º/2º/3º horário × P1/P2/P3)
-    h1p1b … h3p3b                  vaga 2 de cada posto (posto duplo)
+    h1p1 … h3p3                    9 vagas (1º/2º/3º horário × P1/P2/P3)
+    h1p1b … h3p3b                  só nas escalas de posto duplo (25/10 a 30/10/2026)
   quem                             índice { uid: vaga } — usado pelas regras para validar cada reserva
                                    olhando uma vaga só (o Firestore limita cada regra a 1.000 expressões)
       null                         vaga livre
@@ -56,7 +56,7 @@ config/admin
 admins/{uid}                       outros aparelhos do ADM, liberados com a senha do ADM
 ```
 
-**Posto duplo:** todo posto tem 2 vagas (18 por escala). Escalas antigas, anteriores a 25/10/2026, foram feitas com 9 vagas e aparecem assim no histórico (`DOUBLE_FROM` em `js/escala.js`, usado só para exibição).
+**Vagas:** 1 militar por posto, 9 vagas por escala. As escalas de 25/10 a 30/10/2026 tiveram posto duplo (18 vagas) e aparecem assim no histórico. Na escala de 31/10, quem já estava na vaga 2 continua aparecendo nela. O período fica em `DOUBLE_FROM`/`SINGLE_FROM` (`js/escala.js`) e em `seatKeysFor()` (`firestore.rules`).
 
 As 9 vagas ficam num único documento: uma leitura mostra a escala inteira, o tempo real é um único listener e a concorrência é resolvida numa transação sobre um documento só. O histórico são os próprios documentos de `escalas` com data anterior; não há cópia duplicada.
 
@@ -114,8 +114,7 @@ Perdeu todos os aparelhos ADM? No console do Firebase, em `config/admin`, troque
 - **Fechamento:** à meia-noite (Brasília) a escala vira histórico, somente leitura, e a tela passa a mostrar a próxima.
 - **Escolha:** ESCOLHER → “Você deseja assumir o 2º horário, P2?” → CONFIRMAR. A gravação é uma transação no Firestore. Se outro militar confirmou antes, aparece “Essa vaga acabou de ser ocupada por outro militar. Escolha outra disponível.”
 - **Uma vaga por militar:** quem já está escalado vê “Você já está escalado nesta escala.”, a própria vaga destacada e o botão **CANCELAR / TROCAR MINHA VAGA** (a vaga volta a ficar livre na hora).
-- **Posto duplo:** cada posto mostra VAGA 1 e VAGA 2; dois militares podem tirar o mesmo posto, cada um em uma vaga.
-- **Status:** AGUARDANDO LIBERAÇÃO, ABERTA, PREENCHIDA (18/18; 9/9 nas escalas antigas) e ENCERRADA. Sempre com texto, não só cor.
+- **Status:** AGUARDANDO LIBERAÇÃO, ABERTA, PREENCHIDA (9/9) e ENCERRADA. Sempre com texto, não só cor.
 - **Tempo real:** todos veem as mudanças em ~1 segundo.
 - **Histórico:** lista por data (“04/10/2026 — Escala de 05/10/2026”). Ao tocar, abre a escala completa, somente leitura. O botão **ESCALA DE HOJE** abre direto a escala em andamento.
 - **Compartilhar escala:** gera a mensagem pronta (LISTA DA GUARNIÇÃO / 1º HORÁRIO / P1 - …) e abre o compartilhamento do celular; sem suporte, abre o WhatsApp Web e copia o texto.

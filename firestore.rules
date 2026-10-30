@@ -8,8 +8,9 @@ rules_version = '2';
 //   config/admin       uid do aparelho principal do administrador (SD EV RIQUELME)
 //   admins/{uid}       outros aparelhos do ADM, liberados com a senha padrão do ADM
 //
-// Posto duplo: cada posto tem 2 vagas (h1p1 e h1p1b ... h3p3 e h3p3b = 18).
-// Escalas antigas, criadas antes do posto duplo, têm só as 9 primeiras chaves.
+// Vagas: h1p1 ... h3p3 (1 militar por posto = 9 vagas).
+// De 25/10 a 30/10/2026 houve posto duplo (h1p1b ... h3p3b, 18 vagas); essas
+// escalas continuam válidas no histórico.
 //
 // Horário: toda validação de abertura/fechamento usa request.time (relógio do
 // servidor Google), nunca o relógio do celular. Brasília = UTC-3 (sem horário
@@ -70,6 +71,17 @@ service cloud.firestore {
 
     function validOm(o) {
       return o in ['CIA C', 'PE'];
+    }
+
+    function slotKeys() {
+      return ['h1p1', 'h1p2', 'h1p3', 'h2p1', 'h2p2', 'h2p3', 'h3p1', 'h3p2', 'h3p3'];
+    }
+
+    // Posto duplo valeu para as escalas de 25/10/2026 a 30/10/2026.
+    // A partir de 31/10/2026 volta o posto normal: 1 militar por posto (9 vagas).
+    // Quem já estava na vaga 2 de uma escala aberta pode continuar ou cancelar.
+    function seatKeysFor(dia) {
+      return dia >= '2026-10-31' ? slotKeys() : doubleKeys();
     }
 
     function doubleKeys() {
@@ -138,7 +150,7 @@ service cloud.firestore {
         && d.data == dia
         && d.createdAt == request.time
         && q.keys().hasOnly([request.auth.uid])
-        && k in doubleKeys()
+        && k in seatKeysFor(dia)
         && d.slots.keys().hasOnly([k])
         && seatOk(d.slots[k]);
     }
@@ -167,7 +179,7 @@ service cloud.firestore {
       let k = nq.get(request.auth.uid, '');
       return n.diff(o).affectedKeys().hasOnly(['slots', 'quem'])
         && !(request.auth.uid in oq)
-        && k in doubleKeys()
+        && k in seatKeysFor(dia)
         && nq.diff(oq).affectedKeys().hasOnly([request.auth.uid])
         && n.slots.diff(o.slots).affectedKeys().hasOnly([k])
         && sv(o.slots, k) == null
@@ -303,7 +315,7 @@ service cloud.firestore {
     }
 
     // Marcador de versão das regras: o app confere se estas regras foram publicadas
-    match /meta/regras-2-2 {
+    match /meta/regras-2-3 {
       allow get: if signedIn();
       allow write: if false;
     }

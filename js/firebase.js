@@ -7,8 +7,8 @@ import {
   doc, getDoc, getDocFromServer, getDocs, updateDoc, deleteDoc, addDoc, onSnapshot, writeBatch,
   runTransaction, serverTimestamp, deleteField, collection, query, orderBy, limit
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { keysFor, emptySlots } from './escala.js?v=2.2.0';
-import { APP_VERSION } from './versao.js?v=2.2.0';
+import { keysFor, emptySlots } from './escala.js?v=2.3.0';
+import { APP_VERSION } from './versao.js?v=2.3.0';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCL8IFluqGulij4CPkzkwxWetuK6wNZK8M",
@@ -293,7 +293,7 @@ export async function clearErrors(ids) {
 
 export async function rulesUpToDate() {
   try {
-    await getDocFromServer(doc(db, 'meta', 'regras-2-2'));
+    await getDocFromServer(doc(db, 'meta', 'regras-2-3'));
     return true;
   } catch (e) {
     return !(e && e.code === 'permission-denied');
