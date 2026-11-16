@@ -323,8 +323,9 @@ test('posto duplo: escala cheia com 18 e histórico antigo segue com 9', async (
 test('mensagem de nova versão aparece uma vez e aviso de atualização', async () => {
   const page = await open({ ...me(), showNovidades: true }, { at: brt(2026, 10, 24, 19) });
   await page.waitForSelector('#modal[open]');
-  assert.match(await page.textContent('#modalText'), /SD EV RIQUELME[\s\S]*posto normal[\s\S]*parar de rodar na 24 KKKKKKKKKKK/);
+  assert.match(await page.textContent('#modalText'), /SD EV RIQUELME[\s\S]*@tnr\.rec[\s\S]*O tubarão não recua/);
   assert.equal(await page.locator('#modal button[value="cancel"].hidden').count(), 1);
+  assert.equal(await page.getAttribute('#modalLink', 'href'), 'https://www.instagram.com/tnr.rec/');
   await shot(page, '14-novidades');
   await page.click('#modalOk');
   assert.equal(await page.locator('#modal[open]').count(), 0);
@@ -442,5 +443,23 @@ test('sábado 31/10 já é posto normal e mantém quem estava na vaga 2', async 
   await page.waitForSelector('.slot.mine');
   assert.match(await page.textContent('#scaleCount'), /2 de 9/);
   await shot(page, '17-sabado-normal');
+  await page.context().close();
+});
+
+test('apoio TNR discreto no fim da tela inicial', async () => {
+  const page = await open(me(), { at: brt(2026, 11, 16, 19) });
+  await page.waitForSelector('#slotsHome .slot');
+  assert.equal(await page.getAttribute('#apoioInsta', 'href'), 'https://www.instagram.com/tnr.rec/');
+  assert.equal(await page.getAttribute('#apoioSite', 'href'), 'https://tnrec.vercel.app');
+  assert.match(await page.textContent('.apoio'), /sem vínculo institucional/);
+  const order = await page.evaluate(() => {
+    const y = (sel) => document.querySelector(sel).getBoundingClientRect().top;
+    return y('#slotsHome') < y('.group-card') && y('.group-card') < y('.apoio');
+  });
+  assert.ok(order, 'apoio deve ficar abaixo da escala e do grupo');
+  assert.ok(await noHScroll(page));
+  await page.locator('.apoio').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(SHOTS, '18-apoio.png') });
+  assert.equal(await page.locator('#modalLink.hidden').count(), 1);
   await page.context().close();
 });

@@ -120,6 +120,7 @@ Perdeu todos os aparelhos ADM? No console do Firebase, em `config/admin`, troque
 - **Compartilhar escala:** gera a mensagem pronta (LISTA DA GUARNIÇÃO / 1º HORÁRIO / P1 - …) e abre o compartilhamento do celular; sem suporte, abre o WhatsApp Web e copia o texto.
 - **Compartilhar sistema:** compartilhamento nativo ou “Link copiado!”.
 - **Grupo oficial:** botão para o grupo do WhatsApp.
+- **Apoio:** card discreto no fim da tela inicial divulgando a página TNR · Tubarão Não Recua (@tnr.rec / tnrec.vercel.app). Textos e links no `index.html` (bloco `.apoio`); o recado da versão 2.4.0 também apresenta a página uma única vez.
 - **Offline:** dados ficam em cache local (consulta sem sinal), mas **reserva só é confirmada online** — transações do Firestore exigem o servidor.
 - **PWA:** “Adicionar à tela inicial” no Android/iPhone abre como aplicativo (“Escala SD EV”).
 

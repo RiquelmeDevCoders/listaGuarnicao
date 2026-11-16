@@ -7,8 +7,8 @@ import {
   doc, getDoc, getDocFromServer, getDocs, updateDoc, deleteDoc, addDoc, onSnapshot, writeBatch,
   runTransaction, serverTimestamp, deleteField, collection, query, orderBy, limit
 } from 'https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js';
-import { keysFor, emptySlots } from './escala.js?v=2.3.0';
-import { APP_VERSION } from './versao.js?v=2.3.0';
+import { keysFor, emptySlots } from './escala.js?v=2.4.0';
+import { APP_VERSION } from './versao.js?v=2.4.0';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCL8IFluqGulij4CPkzkwxWetuK6wNZK8M",

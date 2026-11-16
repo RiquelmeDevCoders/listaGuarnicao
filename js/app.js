@@ -3,13 +3,13 @@ import {
   registerUser, syncServerClock, watchScale, reserveSlot, releaseSlot, adminRemoveSlot,
   getScale, listHistory, listUsers, setUserBlocked, deleteUser, logError, listErrors,
   clearErrors, rulesUpToDate, completeIndex
-} from './firebase.js?v=2.3.0';
-import { isDouble, seatsShown, keysFor, capacityOf, keyInfo } from './escala.js?v=2.3.0';
-import { APP_VERSION, NOVIDADES } from './versao.js?v=2.3.0';
+} from './firebase.js?v=2.4.0';
+import { isDouble, seatsShown, keysFor, capacityOf, keyInfo } from './escala.js?v=2.4.0';
+import { APP_VERSION, NOVIDADES } from './versao.js?v=2.4.0';
 import {
   STATUS, todayId, nextScaleId, addDays, weekdayName, openingMs, scaleStatus,
   formatBR, formatClock, formatDateTime, formatCountdown, greeting, openingHour
-} from './time.js?v=2.3.0';
+} from './time.js?v=2.4.0';
 
 const WHATSAPP_GROUP = 'https://chat.whatsapp.com/CT5EigeEZAr36FZMgSYE2r?s=cl&p=i&mlu=4&ilr=4';
 const SHIFT_NAMES = ['PRIMEIRO HORÁRIO', 'SEGUNDO HORÁRIO', 'TERCEIRO HORÁRIO'];
@@ -93,8 +93,14 @@ function toast(text, type = 'ok', ms = 3600) {
   }, ms);
 }
 
-function confirmModal({ title, text = '', ok = 'CONFIRMAR', eyebrow = 'CONFIRMAÇÃO', danger = false, single = false }) {
+function confirmModal({ title, text = '', ok = 'CONFIRMAR', eyebrow = 'CONFIRMAÇÃO', danger = false, single = false, link = null }) {
   const modal = $('modal');
+  const linkEl = $('modalLink');
+  linkEl.classList.toggle('hidden', !link);
+  if (link) {
+    linkEl.href = link.href;
+    linkEl.textContent = link.label;
+  }
   modal.querySelector('button[value="cancel"]').classList.toggle('hidden', single);
   modal.querySelector('.grid2').classList.toggle('single', single);
   $('modalTitle').textContent = title;
@@ -872,7 +878,7 @@ async function showNovidades(isNewUser) {
   if (storage.get(SEEN_KEY) === APP_VERSION) return;
   storage.set(SEEN_KEY, APP_VERSION);
   if (isNewUser) return;
-  await confirmModal({ eyebrow: `VERSÃO ${APP_VERSION}`, title: NOVIDADES.titulo, text: NOVIDADES.texto, ok: NOVIDADES.botao, single: true });
+  await confirmModal({ eyebrow: `VERSÃO ${APP_VERSION}`, title: NOVIDADES.titulo, text: NOVIDADES.texto, ok: NOVIDADES.botao, single: true, link: NOVIDADES.link || null });
 }
 
 async function checkUpdate() {

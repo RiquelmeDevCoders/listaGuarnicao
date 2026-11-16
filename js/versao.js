@@ -1,16 +1,15 @@
-export const APP_VERSION = '2.3.0';
+export const APP_VERSION = '2.4.0';
 
 export const NOVIDADES = {
-  titulo: 'Nova versão no ar!',
+  titulo: 'Recado rápido',
   texto: [
-    'Fala, guerreiro! SD EV RIQUELME na área.',
-    'Voltamos ao posto normal: 1 militar por posto, 9 vagas por escala.',
+    'Fala, guerreiro! SD EV RIQUELME aqui.',
+    'O sistema segue igual: escolhe tua vaga e pronto.',
     '',
-    '• Já vale para a escala de sábado, 31/10.',
-    '• Quem já tinha marcado a vaga 2 continua na escala.',
-    '• As escalas de posto duplo continuam no histórico.',
+    'E quem curte cultura tática, cola na minha nova página: TNR · Tubarão Não Recua (@tnr.rec). Equipamento, treino, mar e humor de quem já trabalhou de madrugada.',
     '',
-    'Escolhe tua vaga e bora parar de rodar na 24 KKKKKKKKKKK'
+    'A placa avisa. O tubarão não recua.'
   ].join('\n'),
-  botao: 'BORA, ENTENDIDO!'
+  link: { href: 'https://www.instagram.com/tnr.rec/', label: 'Conhecer a @tnr.rec' },
+  botao: 'FECHOU!'
 };

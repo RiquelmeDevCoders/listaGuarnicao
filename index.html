@@ -16,8 +16,8 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
-  <link rel="modulepreload" href="js/app.js?v=2.3.0">
-  <link rel="stylesheet" href="css/style.css?v=2.3.0">
+  <link rel="modulepreload" href="js/app.js?v=2.4.0">
+  <link rel="stylesheet" href="css/style.css?v=2.4.0">
 </head>
 <body>
   <a class="skip" href="#main">Pular para o conteúdo</a>
@@ -153,6 +153,22 @@
         </a>
       </section>
 
+      <aside class="apoio" aria-labelledby="apoioTitle">
+        <div class="apoio-head">
+          <span class="apoio-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 19c2 0 3-1.2 5-1.2s3 1.2 5 1.2 3-1.2 5-1.2 3 1.2 5 1.2"/><path d="M7 16.5C8.5 11 12 6.5 18 4.5c-2.2 3.6-2.6 8-.8 12"/></svg></span>
+          <div>
+            <p class="apoio-tag">APOIO</p>
+            <p class="apoio-title" id="apoioTitle">TNR · Tubarão Não Recua</p>
+          </div>
+        </div>
+        <p class="apoio-text">Cultura tática do Recife: equipamento, treino, mar e humor de quem já trabalhou de madrugada. <em>"A placa avisa. O tubarão não recua."</em></p>
+        <div class="apoio-links">
+          <a class="btn btn-ghost btn-sm" id="apoioInsta" href="https://www.instagram.com/tnr.rec/" target="_blank" rel="noopener">@tnr.rec</a>
+          <a class="btn btn-ghost btn-sm" id="apoioSite" href="https://tnrec.vercel.app" target="_blank" rel="noopener">VER SITE</a>
+        </div>
+        <p class="apoio-note">Página independente, sem vínculo institucional.</p>
+      </aside>
+
       <button class="btn btn-ghost btn-block" type="button" id="btnShareApp">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>
         COMPARTILHAR SISTEMA
@@ -225,6 +241,7 @@
       <p class="eyebrow" id="modalEyebrow">CONFIRMAÇÃO</p>
       <h2 id="modalTitle"></h2>
       <p id="modalText" class="muted"></p>
+      <a id="modalLink" class="modal-link hidden" target="_blank" rel="noopener"></a>
       <div class="grid2">
         <button class="btn btn-ghost" value="cancel" type="submit">CANCELAR</button>
         <button class="btn btn-primary" value="ok" type="submit" id="modalOk">CONFIRMAR</button>
@@ -234,6 +251,6 @@
 
   <div class="toasts" id="toasts" aria-live="assertive" aria-atomic="false"></div>
 
-  <script type="module" src="js/app.js?v=2.3.0"></script>
+  <script type="module" src="js/app.js?v=2.4.0"></script>
 </body>
 </html>
